@@ -501,10 +501,16 @@ body {
 }
 
 /* Image Upload Area */
+.upload-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .upload-area {
   border: 2px dashed var(--border);
   border-radius: var(--radius-lg);
-  padding: 32px;
+  padding: 20px 12px;
   text-align: center;
   cursor: pointer;
   transition: var(--transition);

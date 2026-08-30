@@ -75,13 +75,21 @@
             <span class="form-label" id="image-count" style="color: var(--accent-light);">0 ảnh</span>
           </div>
 
-          <div class="upload-area" id="upload-area">
-            <div class="upload-icon">🖼️</div>
-            <h3>Thêm ảnh vào truyện</h3>
-            <p>Nhấn để chọn ảnh hoặc kéo thả vào đây</p>
+          <div class="upload-buttons">
+            <div class="upload-area" id="upload-area">
+              <div class="upload-icon">🖼️</div>
+              <h3>Chọn ảnh</h3>
+              <p>Chọn từng ảnh</p>
+            </div>
+            <div class="upload-area" id="upload-folder-area">
+              <div class="upload-icon">📁</div>
+              <h3>Chọn thư mục</h3>
+              <p>Lấy cả folder ảnh</p>
+            </div>
           </div>
 
           <input type="file" id="file-input" accept="image/*" multiple hidden>
+          <input type="file" id="folder-input" webkitdirectory multiple hidden>
 
           <div class="sort-toggle" id="sort-toggle-container">
             <div class="sort-toggle-info">

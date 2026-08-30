@@ -757,6 +757,19 @@ class KhoTruyen {
       fileInput.click();
     });
 
+    // Folder input
+    const folderInput = document.getElementById('folder-input');
+    folderInput.addEventListener('change', (e) => {
+      this.handleFileSelect(e.target.files);
+      e.target.value = '';
+    });
+
+    // Upload folder area click
+    const uploadFolderArea = document.getElementById('upload-folder-area');
+    uploadFolderArea.addEventListener('click', () => {
+      folderInput.click();
+    });
+
     // Drag & drop on upload area
     uploadArea.addEventListener('dragover', (e) => {
       e.preventDefault();
