@@ -429,13 +429,20 @@ class KhoTruyen {
   }
 
   // Extract number from filename for sorting
+  // Prioritizes 1-3 digit numbers at the START of the filename
   extractNumber(filename) {
     // Remove extension
     const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
-    // Try to find numbers in the filename
+    
+    // Priority: find 1-3 digit number at the START of the filename
+    const leadingMatch = nameWithoutExt.match(/^(\d{1,3})(?:\D|$)/);
+    if (leadingMatch) {
+      return parseInt(leadingMatch[1], 10);
+    }
+
+    // Fallback: find any numbers in the filename
     const matches = nameWithoutExt.match(/(\d+)/g);
     if (matches) {
-      // Return the last number found (handles cases like "chapter1_page03")
       return parseInt(matches[matches.length - 1], 10);
     }
     return Infinity; // No number found, put at end
