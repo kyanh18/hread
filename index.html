@@ -83,6 +83,20 @@
 
           <input type="file" id="file-input" accept="image/*" multiple hidden>
 
+          <div class="sort-toggle" id="sort-toggle-container">
+            <div class="sort-toggle-info">
+              <span class="sort-toggle-icon">🔢</span>
+              <div>
+                <div class="sort-toggle-label">Tự động sắp xếp theo số</div>
+                <div class="sort-toggle-desc">Sắp xếp ảnh theo số trong tên file (01, 02, 03...)</div>
+              </div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="auto-sort-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
           <div class="image-list" id="image-list"></div>
         </div>
       </div>

@@ -117,6 +117,7 @@ class KhoTruyen {
     this.readerUIVisible = true;
     this.searchTerm = '';
     this.dragState = null;
+    this.autoSort = true;
   }
 
   async init() {
@@ -216,6 +217,9 @@ class KhoTruyen {
   openCreate() {
     this.currentStory = null;
     this.editImages = [];
+    this.autoSort = true;
+    document.getElementById('auto-sort-toggle').checked = true;
+    this.updateSortToggleStyle();
     document.getElementById('create-title').textContent = 'Tạo truyện mới';
     document.getElementById('story-name-input').value = '';
     document.getElementById('delete-story-btn').style.display = 'none';
@@ -236,6 +240,9 @@ class KhoTruyen {
       order: img.order,
     }));
 
+    this.autoSort = false;
+    document.getElementById('auto-sort-toggle').checked = false;
+    this.updateSortToggleStyle();
     document.getElementById('create-title').textContent = 'Chỉnh sửa truyện';
     document.getElementById('story-name-input').value = story.name;
     document.getElementById('delete-story-btn').style.display = 'flex';
@@ -385,7 +392,7 @@ class KhoTruyen {
       return;
     }
 
-    // Sort files by name for natural order
+    // Sort new files by name for natural order
     fileArr.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
     for (const file of fileArr) {
@@ -396,6 +403,11 @@ class KhoTruyen {
         data: data,
         order: this.editImages.length,
       });
+    }
+
+    // Apply auto-sort if enabled
+    if (this.autoSort) {
+      this.sortImagesByNumber();
     }
 
     this.renderEditImages();
@@ -414,6 +426,49 @@ class KhoTruyen {
   removeEditImage(index) {
     this.editImages.splice(index, 1);
     this.renderEditImages();
+  }
+
+  // Extract number from filename for sorting
+  extractNumber(filename) {
+    // Remove extension
+    const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
+    // Try to find numbers in the filename
+    const matches = nameWithoutExt.match(/(\d+)/g);
+    if (matches) {
+      // Return the last number found (handles cases like "chapter1_page03")
+      return parseInt(matches[matches.length - 1], 10);
+    }
+    return Infinity; // No number found, put at end
+  }
+
+  sortImagesByNumber() {
+    this.editImages.sort((a, b) => {
+      const numA = this.extractNumber(a.name);
+      const numB = this.extractNumber(b.name);
+      if (numA !== numB) return numA - numB;
+      // If same number, sort by full name
+      return a.name.localeCompare(b.name, undefined, { numeric: true });
+    });
+  }
+
+  toggleAutoSort() {
+    this.autoSort = document.getElementById('auto-sort-toggle').checked;
+    this.updateSortToggleStyle();
+
+    if (this.autoSort && this.editImages.length > 0) {
+      this.sortImagesByNumber();
+      this.renderEditImages();
+      this.showToast('Đã sắp xếp theo số ✓', 'success');
+    }
+  }
+
+  updateSortToggleStyle() {
+    const container = document.getElementById('sort-toggle-container');
+    if (this.autoSort) {
+      container.classList.add('active');
+    } else {
+      container.classList.remove('active');
+    }
   }
 
   async saveStory() {
@@ -681,6 +736,12 @@ class KhoTruyen {
     fileInput.addEventListener('change', (e) => {
       this.handleFileSelect(e.target.files);
       e.target.value = ''; // Reset to allow same file
+    });
+
+    // Auto-sort toggle
+    const sortToggle = document.getElementById('auto-sort-toggle');
+    sortToggle.addEventListener('change', () => {
+      this.toggleAutoSort();
     });
 
     // Upload area click
