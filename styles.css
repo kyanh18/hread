@@ -603,29 +603,86 @@ body {
   line-height: 1.5;
 }
 
-/* FAB Button */
-.fab {
+/* FAB Button Group */
+.fab-group {
   position: fixed;
-  bottom: 30px;
-  right: 20px;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
+  bottom: 24px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  z-index: 200;
+}
+
+.fab {
   border: none;
-  background: var(--accent-gradient);
-  color: white;
-  font-size: 1.5rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: var(--shadow-lg), 0 0 25px var(--accent-glow);
   transition: var(--transition-bounce);
-  z-index: 200;
 }
 
-.fab:active {
+.fab-main {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  color: white;
+  font-size: 1.5rem;
+}
+
+.fab-main:active {
   transform: scale(0.9) rotate(90deg);
+}
+
+.fab-batch {
+  padding: 8px 16px;
+  height: 38px;
+  border-radius: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-active);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4), 0 0 10px var(--accent-glow);
+  animation: slideUp 0.3s ease;
+}
+
+.fab-batch:active {
+  transform: scale(0.94);
+  background: rgba(108, 92, 231, 0.2);
+}
+
+.fab-batch .fab-icon {
+  font-size: 0.95rem;
+}
+
+.fab-batch .fab-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-light);
+  white-space: nowrap;
+}
+
+.batch-shortcut-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(108, 92, 231, 0.08);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.batch-shortcut-banner:active {
+  transform: scale(0.98);
+  background: rgba(108, 92, 231, 0.16);
 }
 
 /* ========== CREATE / EDIT SCREEN ========== */
@@ -1452,6 +1509,70 @@ body {
   height: 100%;
   background: var(--accent-gradient);
   transition: width 0.2s ease;
+}
+
+/* Batch Modal */
+.batch-modal-body {
+  overflow-y: auto;
+  max-height: 62vh;
+  padding-right: 2px;
+}
+
+.batch-preview-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin-bottom: 12px;
+  animation: fadeIn 0.25s ease;
+}
+
+.batch-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.batch-folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.batch-folder-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  gap: 10px;
+}
+
+.batch-folder-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.batch-folder-count {
+  font-size: 0.72rem;
+  color: var(--accent-light);
+  background: rgba(108, 92, 231, 0.12);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  font-weight: 600;
 }
 
 /* ========== TOAST ========== */

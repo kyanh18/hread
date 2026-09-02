@@ -90,12 +90,18 @@
         </div>
       </div>
 
-      <button class="fab" onclick="app.openCreate()" id="fab-create" aria-label="Tạo truyện mới">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-      </button>
+      <div class="fab-group">
+        <button class="fab fab-batch" onclick="app.openBatchModal()" id="fab-batch" aria-label="Tạo hàng loạt từ thư mục lớn" title="Tạo hàng loạt từ thư mục">
+          <span class="fab-icon">⚡📁</span>
+          <span class="fab-label">Hàng loạt</span>
+        </button>
+        <button class="fab fab-main" onclick="app.openCreate()" id="fab-create" aria-label="Tạo 1 truyện mới" title="Tạo 1 truyện">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- ==================== CREATE / EDIT SCREEN ==================== -->
@@ -110,6 +116,15 @@
       </div>
 
       <div class="create-form">
+        <div class="batch-shortcut-banner" onclick="app.openBatchModal()">
+          <span style="font-size: 1.3rem;">⚡</span>
+          <div style="flex: 1; text-align: left;">
+            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Tạo hàng loạt từ thư mục lớn?</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Tự động tạo nhiều truyện theo tên các thư mục con</div>
+          </div>
+          <span style="color: var(--accent-light); font-size: 0.78rem; font-weight: 700;">Thử ngay →</span>
+        </div>
+
         <div class="form-group">
           <label class="form-label" for="story-name-input">Tên truyện</label>
           <input type="text" class="form-input" id="story-name-input" placeholder="Nhập tên truyện...">
@@ -374,6 +389,91 @@
 
         <div class="modal-actions-horizontal" style="margin-top: 14px;">
           <button class="btn btn-secondary" style="flex: 1;" onclick="app.closeBackupModal()">
+            Đóng
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== BATCH CREATE MODAL ==================== -->
+    <div class="modal-overlay" id="batch-modal-overlay" style="display: none;">
+      <div class="modal-content modal-content-large">
+        <div class="modal-handle"></div>
+        <div class="modal-header-row">
+          <div class="modal-title">⚡ Tạo hàng loạt từ thư mục</div>
+          <button class="modal-close-btn" onclick="app.closeBatchModal()" aria-label="Đóng">✕</button>
+        </div>
+
+        <div class="batch-modal-body">
+          <p class="modal-desc" style="color: var(--text-secondary); font-size: 0.82rem; margin-bottom: 14px; line-height: 1.4;">
+            Chọn 1 thư mục mẹ chứa nhiều thư mục truyện. App sẽ tự động tạo từng truyện theo tên thư mục con và sắp xếp các ảnh bên trong theo số!
+          </p>
+
+          <!-- Category selection -->
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label class="form-label" for="batch-category-select">Gán vào danh mục (tùy chọn)</label>
+            <select class="form-input" id="batch-category-select">
+              <option value="">-- Không gán danh mục --</option>
+              <!-- Populated dynamically with categories -->
+            </select>
+          </div>
+
+          <!-- Sort toggle -->
+          <div class="sort-toggle" id="batch-sort-toggle-container" style="margin-bottom: 14px; padding: 10px 14px;">
+            <div class="sort-toggle-info">
+              <span class="sort-toggle-icon">🔢</span>
+              <div>
+                <div class="sort-toggle-label" style="font-size: 0.82rem;">Tự sắp xếp ảnh theo số</div>
+                <div class="sort-toggle-desc" style="font-size: 0.7rem;">Ưu tiên số ở đầu tên file (01, 02...)</div>
+              </div>
+            </div>
+            <label class="toggle-switch" style="width: 42px; height: 24px;">
+              <input type="checkbox" id="batch-sort-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <!-- Folder Select Button -->
+          <div class="upload-area" id="batch-upload-area" style="padding: 22px 16px; margin-bottom: 14px;">
+            <div class="upload-icon" style="font-size: 2rem; margin-bottom: 6px;">📁📂</div>
+            <h3 style="font-size: 0.95rem; margin-bottom: 4px;">Chọn thư mục tổng</h3>
+            <p style="font-size: 0.75rem;">Chọn thư mục chứa tất cả các folder truyện</p>
+          </div>
+          <input type="file" id="batch-folder-input" webkitdirectory multiple hidden>
+
+          <!-- Preview section (hidden until folder selected) -->
+          <div class="batch-preview-section" id="batch-preview-section" style="display: none;">
+            <div class="batch-preview-header">
+              <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary);" id="batch-preview-summary">
+                Tìm thấy 0 truyện
+              </span>
+              <span style="font-size: 0.72rem; color: var(--accent-light); font-weight: 600;" id="batch-preview-total-images">
+                0 ảnh
+              </span>
+            </div>
+            <div class="batch-folder-list" id="batch-folder-list">
+              <!-- List of detected folders -->
+            </div>
+
+            <button class="btn btn-primary" id="batch-start-btn" style="width: 100%; margin-top: 12px; font-size: 0.88rem;" onclick="app.startBatchImport()">
+              🚀 Bắt đầu tạo truyện ngay
+            </button>
+          </div>
+
+          <!-- Progress card -->
+          <div class="backup-progress-card" id="batch-progress-card" style="display: none; margin-top: 10px;">
+            <div class="backup-progress-info">
+              <span class="spinner" id="batch-spinner" style="width: 18px; height: 18px; border-width: 2px;"></span>
+              <span id="batch-status-text" style="font-size: 0.82rem; font-weight: 600;">Đang xử lý...</span>
+            </div>
+            <div class="backup-progress-bar-bg">
+              <div class="backup-progress-bar-fill" id="batch-progress-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions-horizontal" style="margin-top: 14px;">
+          <button class="btn btn-secondary" style="flex: 1;" onclick="app.closeBatchModal()">
             Đóng
           </button>
         </div>

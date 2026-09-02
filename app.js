@@ -169,6 +169,7 @@ class KhoTruyen {
     this.storyAssignCategoryIds = new Set();
     this.currentMenuStoryId = null;
     this.objectUrlsToRevoke = new Set();
+    this.batchDetectedFolders = [];
   }
 
   createManagedUrl(blobOrData) {
@@ -1401,6 +1402,233 @@ class KhoTruyen {
     return res.blob();
   }
 
+  // ==================== BATCH CREATE FROM FOLDERS ====================
+  async openBatchModal() {
+    this.batchDetectedFolders = [];
+    const fileInput = document.getElementById('batch-folder-input');
+    if (fileInput) fileInput.value = '';
+
+    const previewSec = document.getElementById('batch-preview-section');
+    if (previewSec) previewSec.style.display = 'none';
+
+    const progressCard = document.getElementById('batch-progress-card');
+    if (progressCard) progressCard.style.display = 'none';
+
+    const startBtn = document.getElementById('batch-start-btn');
+    if (startBtn) startBtn.disabled = false;
+
+    // Populate category dropdown
+    this.categories = await this.db.getAllCategories();
+    const select = document.getElementById('batch-category-select');
+    if (select) {
+      let html = '<option value="">-- Không gán danh mục --</option>';
+      for (const cat of this.categories) {
+        const isSelected = this.selectedCategoryId === cat.id;
+        html += `<option value="${cat.id}" ${isSelected ? 'selected' : ''}>📁 ${this.escapeHTML(cat.name)}</option>`;
+      }
+      select.innerHTML = html;
+    }
+
+    const modal = document.getElementById('batch-modal-overlay');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  closeBatchModal() {
+    const modal = document.getElementById('batch-modal-overlay');
+    if (modal) modal.style.display = 'none';
+    this.batchDetectedFolders = [];
+  }
+
+  handleBatchFolderSelect(files) {
+    if (!files || files.length === 0) return;
+
+    // Filter image files
+    const imageFiles = Array.from(files).filter((f) => {
+      const name = f.name.toLowerCase();
+      return f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(name);
+    });
+
+    if (imageFiles.length === 0) {
+      this.showToast('Không tìm thấy file ảnh nào trong thư mục!', 'error');
+      return;
+    }
+
+    // Group files by subfolder
+    const folderMap = new Map();
+
+    for (const file of imageFiles) {
+      const path = file.webkitRelativePath || file.name;
+      const parts = path.split('/');
+      
+      // If path has subfolders: MasterFolder/StoryName/01.jpg
+      let folderName = '';
+      if (parts.length > 2) {
+        folderName = parts.slice(1, -1).join(' - ').trim();
+      } else if (parts.length === 2) {
+        folderName = parts[0];
+      } else {
+        folderName = 'Truyện mới';
+      }
+
+      if (!folderName) folderName = 'Truyện mới';
+
+      if (!folderMap.has(folderName)) {
+        folderMap.set(folderName, []);
+      }
+      folderMap.get(folderName).push(file);
+    }
+
+    this.batchDetectedFolders = Array.from(folderMap.entries()).map(([name, fList]) => ({
+      name,
+      files: fList,
+    }));
+
+    // Natural sort folders by name
+    this.batchDetectedFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+    this.renderBatchPreview();
+  }
+
+  renderBatchPreview() {
+    const previewSec = document.getElementById('batch-preview-section');
+    const summaryEl = document.getElementById('batch-preview-summary');
+    const totalImgsEl = document.getElementById('batch-preview-total-images');
+    const listEl = document.getElementById('batch-folder-list');
+
+    if (!this.batchDetectedFolders || this.batchDetectedFolders.length === 0) {
+      if (previewSec) previewSec.style.display = 'none';
+      return;
+    }
+
+    const totalImages = this.batchDetectedFolders.reduce((sum, f) => sum + f.files.length, 0);
+
+    if (summaryEl) summaryEl.textContent = `Tìm thấy ${this.batchDetectedFolders.length} bộ truyện`;
+    if (totalImgsEl) totalImgsEl.textContent = `Tổng ${totalImages} ảnh`;
+
+    if (listEl) {
+      listEl.innerHTML = this.batchDetectedFolders
+        .map(
+          (folder) => `
+        <div class="batch-folder-item">
+          <span class="batch-folder-name" title="${this.escapeHTML(folder.name)}">📖 ${this.escapeHTML(folder.name)}</span>
+          <span class="batch-folder-count">${folder.files.length} ảnh</span>
+        </div>
+      `
+        )
+        .join('');
+    }
+
+    if (previewSec) previewSec.style.display = 'block';
+  }
+
+  updateBatchProgress(text, percent) {
+    const card = document.getElementById('batch-progress-card');
+    const textEl = document.getElementById('batch-status-text');
+    const fillEl = document.getElementById('batch-progress-fill');
+    if (card) card.style.display = 'flex';
+    if (textEl) textEl.textContent = text;
+    if (fillEl) fillEl.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+  }
+
+  async startBatchImport() {
+    if (!this.batchDetectedFolders || this.batchDetectedFolders.length === 0) {
+      this.showToast('Chưa có thư mục truyện nào được chọn!', 'error');
+      return;
+    }
+
+    const selectedCatId = document.getElementById('batch-category-select')?.value;
+    const shouldSort = document.getElementById('batch-sort-toggle')?.checked ?? true;
+    const totalFolders = this.batchDetectedFolders.length;
+
+    const startBtn = document.getElementById('batch-start-btn');
+    if (startBtn) startBtn.disabled = true;
+
+    let createdStoryIds = [];
+    let completedCount = 0;
+
+    try {
+      for (let fIdx = 0; fIdx < totalFolders; fIdx++) {
+        const folder = this.batchDetectedFolders[fIdx];
+        const percent = Math.round((fIdx / totalFolders) * 92);
+        this.updateBatchProgress(`Đang tạo (${fIdx + 1}/${totalFolders}): ${folder.name}...`, percent);
+
+        let fileList = [...folder.files];
+        if (shouldSort) {
+          fileList.sort((a, b) => {
+            const numA = this.extractNumber(a.name);
+            const numB = this.extractNumber(b.name);
+            if (numA !== numB) return numA - numB;
+            return a.name.localeCompare(b.name, undefined, { numeric: true });
+          });
+        }
+
+        const storyId = this.generateId();
+        const now = Date.now();
+
+        // Thumbnail cover from 1st image
+        let coverData = '';
+        try {
+          coverData = await this.generateThumbnail(fileList[0], 300, 400);
+        } catch (e) {
+          console.warn('Could not generate cover for batch story:', folder.name);
+        }
+
+        const story = {
+          id: storyId,
+          name: folder.name,
+          coverData: coverData,
+          imageCount: fileList.length,
+          createdAt: now + fIdx,
+          updatedAt: now + fIdx,
+        };
+
+        await this.db.addStory(story);
+        createdStoryIds.push(storyId);
+
+        // Save images as Blobs directly
+        for (let i = 0; i < fileList.length; i++) {
+          await this.db.addImage({
+            id: this.generateId(),
+            storyId: storyId,
+            name: fileList[i].name,
+            data: fileList[i], // Blob
+            order: i,
+          });
+        }
+
+        completedCount++;
+      }
+
+      // Assign to category if selected
+      if (selectedCatId) {
+        this.updateBatchProgress('Đang gán truyện vào danh mục...', 96);
+        const cat = this.categories.find((c) => c.id === selectedCatId);
+        if (cat) {
+          cat.storyIds = cat.storyIds || [];
+          for (const sId of createdStoryIds) {
+            if (!cat.storyIds.includes(sId)) {
+              cat.storyIds.push(sId);
+            }
+          }
+          await this.db.addCategory(cat);
+          this.selectedCategoryId = cat.id; // Automatically switch view to this category
+        }
+      }
+
+      this.updateBatchProgress('Hoàn tất!', 100);
+      this.showToast(`Đã tạo thành công ${completedCount} bộ truyện ✓`, 'success');
+
+      setTimeout(async () => {
+        this.closeBatchModal();
+        await this.loadLibrary();
+      }, 1000);
+    } catch (err) {
+      console.error('Batch import error:', err);
+      this.showToast('Lỗi khi tạo hàng loạt: ' + err.message, 'error');
+      if (startBtn) startBtn.disabled = false;
+    }
+  }
+
   // ==================== TOAST ====================
   showToast(message, type = '') {
     // Remove existing toast
@@ -1520,6 +1748,24 @@ class KhoTruyen {
       }
     });
 
+    // Batch folder input & upload area
+    const batchFolderInput = document.getElementById('batch-folder-input');
+    batchFolderInput?.addEventListener('change', (e) => {
+      this.handleBatchFolderSelect(e.target.files);
+      e.target.value = '';
+    });
+
+    const batchUploadArea = document.getElementById('batch-upload-area');
+    batchUploadArea?.addEventListener('click', () => {
+      batchFolderInput?.click();
+    });
+
+    document.getElementById('batch-modal-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        this.closeBatchModal();
+      }
+    });
+
     // Keyboard escape
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
@@ -1527,6 +1773,7 @@ class KhoTruyen {
         this.closeCategoryModal();
         this.closeStoryCategoryModal();
         this.closeBackupModal();
+        this.closeBatchModal();
       }
     });
   }
