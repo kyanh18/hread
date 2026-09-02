@@ -125,6 +125,17 @@ class StoryDB {
     return new Promise((resolve) => { tx.oncomplete = resolve; });
   }
 
+  async clearAllData() {
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(['stories', 'images', 'categories'], 'readwrite');
+      tx.objectStore('stories').clear();
+      tx.objectStore('images').clear();
+      tx.objectStore('categories').clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   _transaction(storeName, mode, callback) {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(storeName, mode);
@@ -157,6 +168,25 @@ class KhoTruyen {
     this.categorySelectedStoryIds = new Set();
     this.storyAssignCategoryIds = new Set();
     this.currentMenuStoryId = null;
+    this.objectUrlsToRevoke = new Set();
+  }
+
+  createManagedUrl(blobOrData) {
+    if (blobOrData instanceof Blob) {
+      const url = URL.createObjectURL(blobOrData);
+      this.objectUrlsToRevoke.add(url);
+      return url;
+    }
+    return blobOrData; // already data URL or string
+  }
+
+  revokeManagedUrls() {
+    for (const url of this.objectUrlsToRevoke) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (e) {}
+    }
+    this.objectUrlsToRevoke.clear();
   }
 
   async init() {
@@ -351,6 +381,7 @@ class KhoTruyen {
 
   // ==================== CREATE / EDIT ====================
   openCreate() {
+    this.revokeManagedUrls();
     this.currentStory = null;
     this.editImages = [];
     this.autoSort = true;
@@ -367,12 +398,14 @@ class KhoTruyen {
     const story = await this.db.getStory(storyId);
     if (!story) return;
 
+    this.revokeManagedUrls();
     this.currentStory = story;
     const images = await this.db.getImagesByStory(storyId);
     this.editImages = images.map((img) => ({
       id: img.id,
       name: img.name,
       data: img.data,
+      previewUrl: this.createManagedUrl(img.data),
       order: img.order,
     }));
 
@@ -403,7 +436,7 @@ class KhoTruyen {
         <div class="drag-handle">
           <span></span><span></span><span></span>
         </div>
-        <img class="image-thumb" src="${img.data}" alt="Trang ${idx + 1}">
+        <img class="image-thumb" src="${img.previewUrl || this.createManagedUrl(img.data)}" alt="Trang ${idx + 1}">
         <div class="image-info">
           <div class="image-name">${this.escapeHTML(img.name || `Trang ${idx + 1}`)}</div>
           <div class="image-order">Trang ${idx + 1} / ${this.editImages.length}</div>
@@ -532,11 +565,12 @@ class KhoTruyen {
     fileArr.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
     for (const file of fileArr) {
-      const data = await this.readFileAsDataURL(file);
+      // Store File directly as Blob - saves ~33% memory and storage size!
       this.editImages.push({
         id: this.generateId(),
         name: file.name,
-        data: data,
+        data: file,
+        previewUrl: this.createManagedUrl(file),
         order: this.editImages.length,
       });
     }
@@ -667,9 +701,11 @@ class KhoTruyen {
     this.loadLibrary();
   }
 
-  async generateThumbnail(dataUrl, maxW, maxH) {
+  async generateThumbnail(dataOrBlob, maxW, maxH) {
     return new Promise((resolve) => {
       const img = new Image();
+      const isBlob = dataOrBlob instanceof Blob;
+      const url = isBlob ? URL.createObjectURL(dataOrBlob) : dataOrBlob;
       img.onload = () => {
         const canvas = document.createElement('canvas');
         let w = img.width;
@@ -685,9 +721,14 @@ class KhoTruyen {
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, w, h);
+        if (isBlob) URL.revokeObjectURL(url);
         resolve(canvas.toDataURL('image/jpeg', 0.7));
       };
-      img.src = dataUrl;
+      img.onerror = () => {
+        if (isBlob) URL.revokeObjectURL(url);
+        resolve('');
+      };
+      img.src = url;
     });
   }
 
@@ -713,6 +754,7 @@ class KhoTruyen {
       return;
     }
 
+    this.revokeManagedUrls();
     this.currentStory = story;
     this.readerUIVisible = true;
 
@@ -721,12 +763,12 @@ class KhoTruyen {
     document.getElementById('reader-total').textContent = images.length;
     document.getElementById('reader-current').textContent = '1';
 
-    // Render images
+    // Render images with lazy loading, async decoding, and managed URLs
     const content = document.getElementById('reader-content');
     content.innerHTML = images
       .map(
         (img, idx) => `
-      <img src="${img.data}" alt="Trang ${idx + 1}" data-page="${idx + 1}">
+      <img src="${this.createManagedUrl(img.data)}" alt="Trang ${idx + 1}" data-page="${idx + 1}" loading="lazy" decoding="async">
     `
       )
       .join('');
@@ -807,6 +849,9 @@ class KhoTruyen {
       window.removeEventListener('scroll', this._readerScrollHandler);
       this._readerScrollHandler = null;
     }
+    this.revokeManagedUrls();
+    const content = document.getElementById('reader-content');
+    if (content) content.innerHTML = '';
     this.showScreen('library');
     this.loadLibrary();
   }
@@ -1142,6 +1187,220 @@ class KhoTruyen {
     if (modal) modal.style.display = 'none';
   }
 
+  // ==================== BACKUP & RESTORE ====================
+  openBackupModal() {
+    const modal = document.getElementById('backup-modal-overlay');
+    if (modal) modal.style.display = 'flex';
+    this.hideBackupProgress();
+  }
+
+  closeBackupModal() {
+    const modal = document.getElementById('backup-modal-overlay');
+    if (modal) modal.style.display = 'none';
+    this.hideBackupProgress();
+  }
+
+  showBackupProgress(text, percent = 0) {
+    const card = document.getElementById('backup-progress-card');
+    const textEl = document.getElementById('backup-status-text');
+    const fillEl = document.getElementById('backup-progress-fill');
+    if (card) card.style.display = 'flex';
+    if (textEl) textEl.textContent = text;
+    if (fillEl) fillEl.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+  }
+
+  hideBackupProgress() {
+    const card = document.getElementById('backup-progress-card');
+    if (card) card.style.display = 'none';
+  }
+
+  async exportBackup() {
+    try {
+      this.showBackupProgress('Đang đọc danh sách truyện & danh mục...', 5);
+
+      const stories = await this.db.getAllStories();
+      const categories = await this.db.getAllCategories();
+
+      if (stories.length === 0 && categories.length === 0) {
+        this.showToast('Kho truyện đang trống, không có gì để sao lưu!', 'error');
+        this.hideBackupProgress();
+        return;
+      }
+
+      this.showBackupProgress('Đang tổng hợp dữ liệu ảnh...', 10);
+      
+      const allImages = [];
+      let totalImgCount = 0;
+      for (const s of stories) {
+        totalImgCount += (s.imageCount || 0);
+      }
+
+      let processedImgs = 0;
+      for (const s of stories) {
+        const imgs = await this.db.getImagesByStory(s.id);
+        for (const img of imgs) {
+          let dataUrl = '';
+          if (img.data instanceof Blob) {
+            dataUrl = await this.blobToDataUrl(img.data);
+          } else {
+            dataUrl = img.data; // already string
+          }
+
+          allImages.push({
+            id: img.id,
+            storyId: img.storyId,
+            name: img.name,
+            data: dataUrl,
+            order: img.order,
+          });
+
+          processedImgs++;
+          const percent = Math.round(10 + (processedImgs / Math.max(1, totalImgCount)) * 75);
+          this.showBackupProgress(`Đang xuất ảnh: ${processedImgs} / ${totalImgCount}...`, percent);
+        }
+      }
+
+      this.showBackupProgress('Đang tạo file sao lưu...', 90);
+
+      const backupData = {
+        app: 'KhoTruyen',
+        version: 2,
+        exportedAt: Date.now(),
+        stories: stories,
+        categories: categories,
+        images: allImages,
+      };
+
+      const jsonStr = JSON.stringify(backupData);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const timeStr = now.toTimeString().slice(0, 5).replace(/:/g, '');
+      const filename = `KhoTruyen_Backup_${dateStr}_${timeStr}.json`;
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      this.showBackupProgress('Đã xuất bản sao lưu thành công!', 100);
+      this.showToast('Đã tải file sao lưu về máy ✓', 'success');
+
+      setTimeout(() => {
+        this.closeBackupModal();
+      }, 1200);
+    } catch (err) {
+      console.error('Backup error:', err);
+      this.showToast('Lỗi khi xuất sao lưu: ' + err.message, 'error');
+      this.hideBackupProgress();
+    }
+  }
+
+  async importBackup(file) {
+    if (!file) return;
+
+    const mode = document.querySelector('input[name="restore-mode"]:checked')?.value || 'merge';
+
+    try {
+      this.showBackupProgress('Đang đọc file sao lưu...', 10);
+      const text = await file.text();
+      
+      this.showBackupProgress('Đang giải mã dữ liệu...', 25);
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error('File JSON bị lỗi định dạng!');
+      }
+
+      if (!data || data.app !== 'KhoTruyen' || !Array.isArray(data.stories)) {
+        throw new Error('File không hợp lệ hoặc không phải bản sao lưu của Kho Truyện!');
+      }
+
+      if (mode === 'replace') {
+        if (!confirm('Chế độ "Thay thế toàn bộ" sẽ xoá toàn bộ kho truyện hiện tại trước khi nạp dữ liệu mới. Bạn có chắc chắn không?')) {
+          this.hideBackupProgress();
+          return;
+        }
+        this.showBackupProgress('Đang xoá dữ liệu cũ...', 35);
+        await this.db.clearAllData();
+      }
+
+      // Restore categories
+      this.showBackupProgress('Đang khôi phục danh mục...', 40);
+      if (Array.isArray(data.categories)) {
+        for (const cat of data.categories) {
+          await this.db.addCategory(cat);
+        }
+      }
+
+      // Restore stories
+      this.showBackupProgress('Đang khôi phục danh sách truyện...', 50);
+      for (const story of data.stories) {
+        await this.db.addStory(story);
+      }
+
+      // Restore images (stored as Blobs for maximum space optimization!)
+      const images = Array.isArray(data.images) ? data.images : [];
+      let restoredImgs = 0;
+      const totalImgs = images.length;
+
+      for (const img of images) {
+        let blobData = null;
+        if (typeof img.data === 'string' && img.data.startsWith('data:')) {
+          blobData = await this.dataUrlToBlob(img.data);
+        } else if (img.data instanceof Blob) {
+          blobData = img.data;
+        }
+
+        await this.db.addImage({
+          id: img.id || this.generateId(),
+          storyId: img.storyId,
+          name: img.name,
+          data: blobData || img.data,
+          order: img.order || 0,
+        });
+
+        restoredImgs++;
+        if (restoredImgs % 5 === 0 || restoredImgs === totalImgs) {
+          const percent = Math.round(50 + (restoredImgs / Math.max(1, totalImgs)) * 48);
+          this.showBackupProgress(`Đang nạp ảnh: ${restoredImgs} / ${totalImgs}...`, percent);
+        }
+      }
+
+      this.showBackupProgress('Khôi phục hoàn tất!', 100);
+      await this.loadLibrary();
+      this.showToast(`Khôi phục thành công ${data.stories.length} truyện ✓`, 'success');
+
+      setTimeout(() => {
+        this.closeBackupModal();
+      }, 1200);
+    } catch (err) {
+      console.error('Restore error:', err);
+      this.showToast('Lỗi khôi phục: ' + err.message, 'error');
+      this.hideBackupProgress();
+    }
+  }
+
+  blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async dataUrlToBlob(dataUrl) {
+    const res = await fetch(dataUrl);
+    return res.blob();
+  }
+
   // ==================== TOAST ====================
   showToast(message, type = '') {
     // Remove existing toast
@@ -1177,6 +1436,16 @@ class KhoTruyen {
     fileInput.addEventListener('change', (e) => {
       this.handleFileSelect(e.target.files);
       e.target.value = ''; // Reset to allow same file
+    });
+
+    // Backup file input
+    const backupFileInput = document.getElementById('backup-file-input');
+    backupFileInput?.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        this.importBackup(file);
+      }
+      e.target.value = '';
     });
 
     // Auto-sort toggle
@@ -1245,12 +1514,19 @@ class KhoTruyen {
       }
     });
 
+    document.getElementById('backup-modal-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        this.closeBackupModal();
+      }
+    });
+
     // Keyboard escape
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.closeModal();
         this.closeCategoryModal();
         this.closeStoryCategoryModal();
+        this.closeBackupModal();
       }
     });
   }

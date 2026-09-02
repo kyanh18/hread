@@ -234,6 +234,41 @@ body {
   position: relative;
 }
 
+.library-hero-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  position: relative;
+}
+
+.hero-backup-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.hero-backup-btn:active {
+  transform: scale(0.95);
+  border-color: var(--accent);
+  background: rgba(108, 92, 231, 0.15);
+}
+
+.hero-backup-btn svg {
+  color: var(--accent-light);
+}
+
 .library-stats {
   display: flex;
   gap: 16px;
@@ -974,13 +1009,21 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  line-height: 0;
+  font-size: 0;
+  background: #000;
 }
 
 .reader-content img {
   width: 100%;
   display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  vertical-align: top;
   user-select: none;
   -webkit-user-drag: none;
+  background: #000;
 }
 
 .reader-progress {
@@ -1298,6 +1341,117 @@ body {
 .story-select-item.selected .custom-checkbox svg,
 .category-checkbox-item.selected .custom-checkbox svg {
   display: block;
+}
+
+/* Backup & Restore Modal */
+.backup-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  max-height: 62vh;
+  padding-right: 2px;
+}
+
+.backup-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.backup-card-header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.backup-card-icon {
+  font-size: 1.4rem;
+  background: rgba(108, 92, 231, 0.12);
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.backup-card-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.backup-card-desc {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.backup-action-btn {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 0.85rem;
+  gap: 8px;
+}
+
+.restore-mode-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-secondary);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+}
+
+.restore-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.restore-radio-label input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+.backup-progress-card {
+  background: rgba(108, 92, 231, 0.08);
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.2s ease;
+}
+
+.backup-progress-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.backup-progress-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.backup-progress-bar-fill {
+  height: 100%;
+  background: var(--accent-gradient);
+  transition: width 0.2s ease;
 }
 
 /* ========== TOAST ========== */
