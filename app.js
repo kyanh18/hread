@@ -6,7 +6,7 @@
 class StoryDB {
   constructor() {
     this.dbName = 'KhoTruyenDB';
-    this.dbVersion = 1;
+    this.dbVersion = 2;
     this.db = null;
   }
 
@@ -23,6 +23,10 @@ class StoryDB {
         if (!db.objectStoreNames.contains('images')) {
           const imgStore = db.createObjectStore('images', { keyPath: 'id' });
           imgStore.createIndex('storyId', 'storyId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('categories')) {
+          const catStore = db.createObjectStore('categories', { keyPath: 'id' });
+          catStore.createIndex('createdAt', 'createdAt', { unique: false });
         }
       };
 
@@ -56,8 +60,37 @@ class StoryDB {
       store.delete(img.id);
     }
     await new Promise((resolve) => { tx.oncomplete = resolve; });
+
+    // Clean up story reference from categories
+    try {
+      const categories = await this.getAllCategories();
+      for (const cat of categories) {
+        if (cat.storyIds && cat.storyIds.includes(id)) {
+          cat.storyIds = cat.storyIds.filter((sId) => sId !== id);
+          await this.addCategory(cat);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not clean story from categories:', err);
+    }
     
     return this._transaction('stories', 'readwrite', (store) => store.delete(id));
+  }
+
+  async addCategory(category) {
+    return this._transaction('categories', 'readwrite', (store) => store.put(category));
+  }
+
+  async getCategory(id) {
+    return this._transaction('categories', 'readonly', (store) => store.get(id));
+  }
+
+  async getAllCategories() {
+    return this._transaction('categories', 'readonly', (store) => store.getAll());
+  }
+
+  async deleteCategory(id) {
+    return this._transaction('categories', 'readwrite', (store) => store.delete(id));
   }
 
   async addImage(imageData) {
@@ -118,6 +151,12 @@ class KhoTruyen {
     this.searchTerm = '';
     this.dragState = null;
     this.autoSort = true;
+    this.selectedCategoryId = 'all';
+    this.categories = [];
+    this.currentCategoryEditId = null;
+    this.categorySelectedStoryIds = new Set();
+    this.storyAssignCategoryIds = new Set();
+    this.currentMenuStoryId = null;
   }
 
   async init() {
@@ -151,37 +190,101 @@ class KhoTruyen {
 
   // ==================== LIBRARY ====================
   async loadLibrary() {
-    const stories = await this.db.getAllStories();
-    const filtered = this.searchTerm
-      ? stories.filter((s) => s.name.toLowerCase().includes(this.searchTerm.toLowerCase()))
-      : stories;
+    this.categories = await this.db.getAllCategories();
+    const allStories = await this.db.getAllStories();
 
     // Sort by last updated
-    filtered.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+    allStories.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+
+    // Render category pills
+    this.renderCategoryPills(allStories);
+
+    // Filter by category
+    let storiesToShow = allStories;
+    const activeBar = document.getElementById('active-category-bar');
+
+    if (this.selectedCategoryId !== 'all') {
+      const currentCat = this.categories.find((c) => c.id === this.selectedCategoryId);
+      if (currentCat) {
+        const catStorySet = new Set(currentCat.storyIds || []);
+        storiesToShow = allStories.filter((s) => catStorySet.has(s.id));
+
+        if (activeBar) {
+          activeBar.style.display = 'flex';
+          const nameEl = document.getElementById('active-category-name');
+          const countEl = document.getElementById('active-category-count');
+          if (nameEl) nameEl.textContent = currentCat.name;
+          if (countEl) countEl.textContent = `${storiesToShow.length} truyện`;
+        }
+      } else {
+        this.selectedCategoryId = 'all';
+        if (activeBar) activeBar.style.display = 'none';
+      }
+    } else {
+      if (activeBar) activeBar.style.display = 'none';
+    }
+
+    // Filter by search term
+    const filtered = this.searchTerm
+      ? storiesToShow.filter((s) => s.name.toLowerCase().includes(this.searchTerm.toLowerCase()))
+      : storiesToShow;
 
     // Update stats
     const statsEl = document.getElementById('library-stats');
-    const totalImages = stories.reduce((sum, s) => sum + (s.imageCount || 0), 0);
-    statsEl.innerHTML = `
-      <div class="stat-badge">
-        <span class="stat-num">${stories.length}</span> truyện
-      </div>
-      <div class="stat-badge">
-        <span class="stat-num">${totalImages}</span> ảnh
-      </div>
-    `;
+    const totalImages = allStories.reduce((sum, s) => sum + (s.imageCount || 0), 0);
+    if (this.selectedCategoryId === 'all') {
+      statsEl.innerHTML = `
+        <div class="stat-badge">
+          <span class="stat-num">${allStories.length}</span> truyện
+        </div>
+        <div class="stat-badge">
+          <span class="stat-num">${totalImages}</span> ảnh
+        </div>
+      `;
+    } else {
+      statsEl.innerHTML = `
+        <div class="stat-badge">
+          <span class="stat-num">${storiesToShow.length}</span> / ${allStories.length} truyện
+        </div>
+        <div class="stat-badge">
+          <span class="stat-num">${this.categories.length}</span> danh mục
+        </div>
+      `;
+    }
 
     // Render grid
     const grid = document.getElementById('story-grid');
     
     if (filtered.length === 0) {
-      grid.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">📚</div>
-          <h3>${this.searchTerm ? 'Không tìm thấy' : 'Chưa có truyện nào'}</h3>
-          <p>${this.searchTerm ? 'Thử tìm kiếm với từ khác' : 'Nhấn nút + để tạo truyện mới\nvà bắt đầu bộ sưu tập của bạn!'}</p>
-        </div>
-      `;
+      if (this.searchTerm) {
+        grid.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">🔍</div>
+            <h3>Không tìm thấy</h3>
+            <p>Thử tìm kiếm với từ khác</p>
+          </div>
+        `;
+      } else if (this.selectedCategoryId !== 'all') {
+        const currentCat = this.categories.find((c) => c.id === this.selectedCategoryId);
+        grid.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">📁</div>
+            <h3>Danh mục trống</h3>
+            <p>Danh mục "${this.escapeHTML(currentCat ? currentCat.name : '')}" chưa có truyện nào.</p>
+            <button class="btn btn-primary" style="margin-top: 14px; padding: 10px 18px; font-size: 0.85rem;" onclick="app.editCurrentCategory()">
+              ➕ Thêm truyện vào danh mục
+            </button>
+          </div>
+        `;
+      } else {
+        grid.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">📚</div>
+            <h3>Chưa có truyện nào</h3>
+            <p>Nhấn nút + để tạo truyện mới<br>và bắt đầu bộ sưu tập của bạn!</p>
+          </div>
+        `;
+      }
       return;
     }
 
@@ -211,6 +314,39 @@ class KhoTruyen {
     `
       )
       .join('');
+  }
+
+  renderCategoryPills(allStories) {
+    const container = document.getElementById('category-pills');
+    if (!container) return;
+
+    const allStoryIds = new Set(allStories.map((s) => s.id));
+
+    let html = `
+      <button class="category-chip ${this.selectedCategoryId === 'all' ? 'active' : ''}" onclick="app.selectCategory('all')">
+        <span>🌐 Tất cả</span>
+        <span class="category-chip-count">${allStories.length}</span>
+      </button>
+    `;
+
+    for (const cat of this.categories) {
+      const count = (cat.storyIds || []).filter((id) => allStoryIds.has(id)).length;
+      const isActive = this.selectedCategoryId === cat.id;
+      html += `
+        <button class="category-chip ${isActive ? 'active' : ''}" onclick="app.selectCategory('${cat.id}')">
+          <span>🏷️ ${this.escapeHTML(cat.name)}</span>
+          <span class="category-chip-count">${count}</span>
+        </button>
+      `;
+    }
+
+    html += `
+      <button class="category-chip add-chip" onclick="app.openCategoryModal()">
+        <span>➕ Danh mục</span>
+      </button>
+    `;
+
+    container.innerHTML = html;
   }
 
   // ==================== CREATE / EDIT ====================
@@ -708,6 +844,304 @@ class KhoTruyen {
     }
   }
 
+  // ==================== CATEGORY MANAGEMENT ====================
+  selectCategory(catId) {
+    this.selectedCategoryId = catId;
+    this.loadLibrary();
+  }
+
+  editCurrentCategory() {
+    if (this.selectedCategoryId !== 'all') {
+      this.openCategoryModal(this.selectedCategoryId);
+    }
+  }
+
+  async deleteCurrentCategoryPrompt() {
+    if (this.selectedCategoryId !== 'all') {
+      this.deleteCategory(this.selectedCategoryId);
+    }
+  }
+
+  async openCategoryModal(catId = null) {
+    this.currentCategoryEditId = catId;
+    this.categorySelectedStoryIds.clear();
+
+    const allStories = await this.db.getAllStories();
+    allStories.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+
+    const nameInput = document.getElementById('category-name-input');
+    const titleEl = document.getElementById('category-modal-title');
+    const deleteBtn = document.getElementById('category-modal-delete-btn');
+
+    if (catId) {
+      const cat = this.categories.find((c) => c.id === catId);
+      if (!cat) return;
+      if (titleEl) titleEl.textContent = 'Chỉnh sửa danh mục';
+      if (nameInput) nameInput.value = cat.name;
+      (cat.storyIds || []).forEach((id) => this.categorySelectedStoryIds.add(id));
+      if (deleteBtn) deleteBtn.style.display = 'block';
+    } else {
+      if (titleEl) titleEl.textContent = 'Tạo danh mục mới';
+      if (nameInput) nameInput.value = '';
+      if (deleteBtn) deleteBtn.style.display = 'none';
+    }
+
+    this.renderCategoryStoriesList(allStories);
+    this.updateCategorySelectCount();
+
+    const modal = document.getElementById('category-modal-overlay');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  renderCategoryStoriesList(allStories) {
+    const list = document.getElementById('category-stories-list');
+    if (!list) return;
+
+    if (allStories.length === 0) {
+      list.innerHTML = `
+        <div style="text-align: center; padding: 25px 10px; color: var(--text-muted); font-size: 0.85rem;">
+          Chưa có truyện nào trong thư viện để thêm.
+        </div>
+      `;
+      return;
+    }
+
+    list.innerHTML = allStories
+      .map((story) => {
+        const isSelected = this.categorySelectedStoryIds.has(story.id);
+        return `
+          <div class="story-select-item ${isSelected ? 'selected' : ''}" data-id="${story.id}" onclick="app.toggleStorySelectionForCategory('${story.id}')">
+            ${
+              story.coverData
+                ? `<img class="story-select-thumb" src="${story.coverData}" alt="${story.name}">`
+                : `<div class="story-select-thumb-placeholder">📖</div>`
+            }
+            <div class="story-select-info">
+              <div class="story-select-name">${this.escapeHTML(story.name)}</div>
+              <div class="story-select-meta">🖼️ ${story.imageCount || 0} ảnh</div>
+            </div>
+            <div class="custom-checkbox">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  toggleStorySelectionForCategory(storyId) {
+    if (this.categorySelectedStoryIds.has(storyId)) {
+      this.categorySelectedStoryIds.delete(storyId);
+    } else {
+      this.categorySelectedStoryIds.add(storyId);
+    }
+
+    const item = document.querySelector(`.story-select-item[data-id="${storyId}"]`);
+    if (item) {
+      if (this.categorySelectedStoryIds.has(storyId)) {
+        item.classList.add('selected');
+      } else {
+        item.classList.remove('selected');
+      }
+    }
+    this.updateCategorySelectCount();
+  }
+
+  async selectAllStoriesForCategory(selectAll) {
+    const allStories = await this.db.getAllStories();
+    if (selectAll) {
+      allStories.forEach((s) => this.categorySelectedStoryIds.add(s.id));
+    } else {
+      this.categorySelectedStoryIds.clear();
+    }
+    this.renderCategoryStoriesList(allStories);
+    this.updateCategorySelectCount();
+  }
+
+  updateCategorySelectCount() {
+    const countEl = document.getElementById('category-select-count');
+    if (countEl) {
+      countEl.textContent = `Đã chọn: ${this.categorySelectedStoryIds.size} truyện`;
+    }
+  }
+
+  closeCategoryModal() {
+    const modal = document.getElementById('category-modal-overlay');
+    if (modal) modal.style.display = 'none';
+    this.currentCategoryEditId = null;
+  }
+
+  async saveCategory() {
+    const nameInput = document.getElementById('category-name-input');
+    const name = nameInput ? nameInput.value.trim() : '';
+
+    if (!name) {
+      this.showToast('Vui lòng nhập tên danh mục!', 'error');
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    const storyIds = Array.from(this.categorySelectedStoryIds);
+    let cat;
+
+    if (this.currentCategoryEditId) {
+      const existing = this.categories.find((c) => c.id === this.currentCategoryEditId);
+      cat = {
+        ...(existing || {}),
+        id: this.currentCategoryEditId,
+        name: name,
+        storyIds: storyIds,
+        updatedAt: Date.now(),
+      };
+    } else {
+      cat = {
+        id: 'cat_' + this.generateId(),
+        name: name,
+        storyIds: storyIds,
+        createdAt: Date.now(),
+      };
+    }
+
+    await this.db.addCategory(cat);
+    this.selectedCategoryId = cat.id;
+    this.closeCategoryModal();
+    await this.loadLibrary();
+    this.showToast(this.currentCategoryEditId ? 'Đã cập nhật danh mục ✓' : 'Đã tạo danh mục mới ✓', 'success');
+  }
+
+  deleteCategoryFromModal() {
+    if (this.currentCategoryEditId) {
+      this.deleteCategory(this.currentCategoryEditId);
+    }
+  }
+
+  async deleteCategory(catId) {
+    const cat = this.categories.find((c) => c.id === catId);
+    const catName = cat ? cat.name : 'danh mục này';
+
+    if (!confirm(`Bạn có chắc muốn xoá danh mục "${catName}"?\n(Các truyện bên trong sẽ KHÔNG bị ảnh hưởng)`)) {
+      return;
+    }
+
+    await this.db.deleteCategory(catId);
+    if (this.selectedCategoryId === catId) {
+      this.selectedCategoryId = 'all';
+    }
+    this.closeCategoryModal();
+    await this.loadLibrary();
+    this.showToast('Đã xoá danh mục ✓', 'success');
+  }
+
+  // ==================== STORY CATEGORY ASSIGN ====================
+  async openStoryCategoryModal() {
+    const storyId = this.currentMenuStoryId;
+    if (!storyId) return;
+
+    this.closeModal(); // Close main story context menu
+
+    const story = await this.db.getStory(storyId);
+    if (!story) return;
+
+    this.categories = await this.db.getAllCategories();
+    this.storyAssignCategoryIds.clear();
+
+    for (const cat of this.categories) {
+      if (cat.storyIds && cat.storyIds.includes(storyId)) {
+        this.storyAssignCategoryIds.add(cat.id);
+      }
+    }
+
+    const titleEl = document.getElementById('story-category-modal-title');
+    if (titleEl) titleEl.textContent = `Phân loại: ${story.name}`;
+
+    const list = document.getElementById('story-category-list');
+    if (list) {
+      if (this.categories.length === 0) {
+        list.innerHTML = `
+          <div style="text-align: center; padding: 24px 10px; color: var(--text-muted); font-size: 0.85rem;">
+            Chưa có danh mục nào.<br><br>
+            <button class="btn btn-primary" style="margin: 0 auto; padding: 8px 16px; font-size: 0.8rem;" onclick="app.closeStoryCategoryModal(); app.openCategoryModal();">
+              ➕ Tạo danh mục mới
+            </button>
+          </div>
+        `;
+      } else {
+        list.innerHTML = this.categories
+          .map((cat) => {
+            const isSelected = this.storyAssignCategoryIds.has(cat.id);
+            return `
+              <div class="category-checkbox-item ${isSelected ? 'selected' : ''}" data-id="${cat.id}" onclick="app.toggleStoryCategoryAssign('${cat.id}')">
+                <span style="font-size: 1.25rem;">📁</span>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary);">${this.escapeHTML(cat.name)}</div>
+                  <div style="font-size: 0.72rem; color: var(--text-muted);">${(cat.storyIds || []).length} truyện</div>
+                </div>
+                <div class="custom-checkbox">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                </div>
+              </div>
+            `;
+          })
+          .join('');
+      }
+    }
+
+    const modal = document.getElementById('story-category-modal-overlay');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  toggleStoryCategoryAssign(catId) {
+    if (this.storyAssignCategoryIds.has(catId)) {
+      this.storyAssignCategoryIds.delete(catId);
+    } else {
+      this.storyAssignCategoryIds.add(catId);
+    }
+
+    const item = document.querySelector(`.category-checkbox-item[data-id="${catId}"]`);
+    if (item) {
+      if (this.storyAssignCategoryIds.has(catId)) {
+        item.classList.add('selected');
+      } else {
+        item.classList.remove('selected');
+      }
+    }
+  }
+
+  async saveStoryCategories() {
+    const storyId = this.currentMenuStoryId;
+    if (!storyId) {
+      this.closeStoryCategoryModal();
+      return;
+    }
+
+    for (const cat of this.categories) {
+      cat.storyIds = cat.storyIds || [];
+      const hasStory = cat.storyIds.includes(storyId);
+      const shouldHave = this.storyAssignCategoryIds.has(cat.id);
+
+      if (shouldHave && !hasStory) {
+        cat.storyIds.push(storyId);
+        await this.db.addCategory(cat);
+      } else if (!shouldHave && hasStory) {
+        cat.storyIds = cat.storyIds.filter((id) => id !== storyId);
+        await this.db.addCategory(cat);
+      }
+    }
+
+    this.closeStoryCategoryModal();
+    await this.loadLibrary();
+    this.showToast('Đã cập nhật danh mục cho truyện ✓', 'success');
+  }
+
+  closeStoryCategoryModal() {
+    const modal = document.getElementById('story-category-modal-overlay');
+    if (modal) modal.style.display = 'none';
+  }
+
   // ==================== TOAST ====================
   showToast(message, type = '') {
     // Remove existing toast
@@ -793,19 +1227,30 @@ class KhoTruyen {
     });
 
     // Modal overlay click to close
-    document.getElementById('modal-overlay').addEventListener('click', (e) => {
+    document.getElementById('modal-overlay')?.addEventListener('click', (e) => {
       if (e.target === e.currentTarget) {
         this.closeModal();
+      }
+    });
+
+    document.getElementById('category-modal-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        this.closeCategoryModal();
+      }
+    });
+
+    document.getElementById('story-category-modal-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        this.closeStoryCategoryModal();
       }
     });
 
     // Keyboard escape
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        const modal = document.getElementById('modal-overlay');
-        if (modal.style.display === 'flex') {
-          this.closeModal();
-        }
+        this.closeModal();
+        this.closeCategoryModal();
+        this.closeStoryCategoryModal();
       }
     });
   }
