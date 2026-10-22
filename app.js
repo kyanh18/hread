@@ -170,6 +170,8 @@ class KhoTruyen {
     this.currentMenuStoryId = null;
     this.objectUrlsToRevoke = new Set();
     this.batchDetectedFolders = [];
+    this.lastLibraryScrollY = 0;
+    this.lastViewedStoryId = null;
   }
 
   createManagedUrl(blobOrData) {
@@ -205,7 +207,7 @@ class KhoTruyen {
   }
 
   // ==================== NAVIGATION ====================
-  showScreen(name) {
+  showScreen(name, preserveScroll = false) {
     document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
     const screen = document.getElementById(`screen-${name}`);
     if (screen) {
@@ -215,8 +217,10 @@ class KhoTruyen {
       screen.style.animation = '';
     }
 
-    // Reset scroll
-    window.scrollTo(0, 0);
+    // Reset scroll unless preserveScroll is true
+    if (!preserveScroll) {
+      window.scrollTo(0, 0);
+    }
   }
 
   // ==================== LIBRARY ====================
@@ -755,6 +759,15 @@ class KhoTruyen {
       return;
     }
 
+    // Remember library scroll position and current story ID before reading
+    this.lastLibraryScrollY = window.scrollY;
+    this.lastViewedStoryId = storyId;
+
+    // Push history state so mobile back gesture/button returns to library naturally
+    if (!history.state || history.state.screen !== 'reader') {
+      history.pushState({ screen: 'reader', storyId }, '');
+    }
+
     this.revokeManagedUrls();
     this.currentStory = story;
     this.readerUIVisible = true;
@@ -845,7 +858,12 @@ class KhoTruyen {
     }
   }
 
-  exitReader() {
+  async exitReader(triggerHistoryBack = true) {
+    if (triggerHistoryBack && history.state && history.state.screen === 'reader') {
+      history.back();
+      return;
+    }
+
     if (this._readerScrollHandler) {
       window.removeEventListener('scroll', this._readerScrollHandler);
       this._readerScrollHandler = null;
@@ -853,8 +871,27 @@ class KhoTruyen {
     this.revokeManagedUrls();
     const content = document.getElementById('reader-content');
     if (content) content.innerHTML = '';
-    this.showScreen('library');
-    this.loadLibrary();
+
+    // Return to library while preserving scroll
+    this.showScreen('library', true);
+    await this.loadLibrary();
+
+    if (this.lastViewedStoryId) {
+      const targetId = this.lastViewedStoryId;
+      setTimeout(() => {
+        const card = document.querySelector(`.story-card[data-id="${targetId}"]`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.add('story-card-highlight');
+          setTimeout(() => card.classList.remove('story-card-highlight'), 1800);
+        } else if (this.lastLibraryScrollY != null) {
+          window.scrollTo({ top: this.lastLibraryScrollY, behavior: 'smooth' });
+        }
+      }, 80);
+      this.lastViewedStoryId = null;
+    } else if (this.lastLibraryScrollY != null) {
+      window.scrollTo(0, this.lastLibraryScrollY);
+    }
   }
 
   // ==================== STORY MENU ====================
@@ -1766,9 +1803,22 @@ class KhoTruyen {
       }
     });
 
+    // Mobile back gesture / hardware back button support
+    window.addEventListener('popstate', (e) => {
+      const readerScreen = document.getElementById('screen-reader');
+      if (readerScreen && readerScreen.classList.contains('active')) {
+        this.exitReader(false);
+      }
+    });
+
     // Keyboard escape
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        const readerScreen = document.getElementById('screen-reader');
+        if (readerScreen && readerScreen.classList.contains('active')) {
+          this.exitReader();
+          return;
+        }
         this.closeModal();
         this.closeCategoryModal();
         this.closeStoryCategoryModal();

@@ -1667,3 +1667,16 @@ img {
     padding-top: max(16px, env(safe-area-inset-top));
   }
 }
+
+/* Story card highlight on return from reader */
+@keyframes storyCardGlow {
+  0% { transform: scale(1.03); box-shadow: 0 0 25px rgba(108, 92, 231, 0.9); }
+  50% { transform: scale(1.02); box-shadow: 0 0 18px rgba(108, 92, 231, 0.6); }
+  100% { transform: scale(1); box-shadow: var(--shadow-sm); }
+}
+
+.story-card-highlight {
+  animation: storyCardGlow 1.8s ease-out;
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px;
+}
