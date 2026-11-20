@@ -1849,6 +1849,12 @@ class KhoTruyen {
     const progressCard = document.getElementById('hitomi-progress-card');
     if (progressCard) progressCard.style.display = 'none';
 
+    const footerBtn = document.getElementById('hitomi-start-btn-footer');
+    if (footerBtn) footerBtn.style.display = 'none';
+
+    const modalBody = document.getElementById('hitomi-modal-body');
+    if (modalBody) modalBody.scrollTop = 0;
+
     const scanBtn = document.getElementById('hitomi-scan-btn');
     if (scanBtn) scanBtn.disabled = false;
 
@@ -1982,10 +1988,12 @@ class KhoTruyen {
     const btnText = document.getElementById('hitomi-scan-btn-text');
     const scanBtn = document.getElementById('hitomi-scan-btn');
     const previewSec = document.getElementById('hitomi-preview-section');
+    const footerBtn = document.getElementById('hitomi-start-btn-footer');
 
     if (spinner) spinner.style.display = 'inline-block';
     if (btnText) btnText.textContent = 'Đang quét dữ liệu...';
     if (scanBtn) scanBtn.disabled = true;
+    if (footerBtn) footerBtn.style.display = 'none';
 
     try {
       const res = await fetch(`${this.hitomiProxyUrl}/api/parse?url=${encodeURIComponent(rawUrl)}`);
@@ -2011,11 +2019,18 @@ class KhoTruyen {
       if (this.hitomiScannedGalleries.length === 0) {
         this.showToast('Không tìm thấy bộ truyện nào từ link này!', 'error');
         if (previewSec) previewSec.style.display = 'none';
+        if (footerBtn) footerBtn.style.display = 'none';
         return;
       }
 
       this.renderHitomiGalleryList();
-      if (previewSec) previewSec.style.display = 'block';
+      if (previewSec) {
+        previewSec.style.display = 'block';
+        setTimeout(() => {
+          previewSec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 100);
+      }
+      if (footerBtn) footerBtn.style.display = 'inline-flex';
 
       this.showToast(`Tìm thấy ${this.hitomiScannedGalleries.length} bộ truyện! ✓`, 'success');
     } catch (err) {
@@ -2028,15 +2043,27 @@ class KhoTruyen {
     }
   }
 
+  updateHitomiSelectionCount() {
+    const count = this.hitomiSelectedGalleryIds.size;
+    const countEl = document.getElementById('hitomi-selected-count');
+    const countFooterEl = document.getElementById('hitomi-selected-count-footer');
+    if (countEl) countEl.textContent = count;
+    if (countFooterEl) countFooterEl.textContent = count;
+
+    const startBtn = document.getElementById('hitomi-start-btn');
+    const footerBtn = document.getElementById('hitomi-start-btn-footer');
+    if (startBtn) startBtn.disabled = (count === 0);
+    if (footerBtn) footerBtn.disabled = (count === 0);
+  }
+
   renderHitomiGalleryList() {
     const list = document.getElementById('hitomi-gallery-list');
     const summary = document.getElementById('hitomi-preview-summary');
     const subtitle = document.getElementById('hitomi-preview-subtitle');
-    const countEl = document.getElementById('hitomi-selected-count');
 
     if (summary) summary.textContent = `Tìm thấy ${this.hitomiScannedGalleries.length} bộ truyện`;
     if (subtitle) subtitle.textContent = this.hitomiScannedTitle;
-    if (countEl) countEl.textContent = this.hitomiSelectedGalleryIds.size;
+    this.updateHitomiSelectionCount();
 
     if (!list) return;
 
@@ -2081,8 +2108,7 @@ class KhoTruyen {
       }
     }
 
-    const countEl = document.getElementById('hitomi-selected-count');
-    if (countEl) countEl.textContent = this.hitomiSelectedGalleryIds.size;
+    this.updateHitomiSelectionCount();
   }
 
   selectAllHitomiGalleries(selectAll) {
@@ -2102,7 +2128,9 @@ class KhoTruyen {
       const progressCard = document.getElementById('hitomi-progress-card');
       if (progressCard) progressCard.style.display = 'none';
       const startBtn = document.getElementById('hitomi-start-btn');
+      const footerBtn = document.getElementById('hitomi-start-btn-footer');
       if (startBtn) startBtn.disabled = false;
+      if (footerBtn) footerBtn.disabled = false;
     }
   }
 
@@ -2123,9 +2151,16 @@ class KhoTruyen {
     const percentText = document.getElementById('hitomi-percent-text');
     const fillEl = document.getElementById('hitomi-progress-fill');
     const startBtn = document.getElementById('hitomi-start-btn');
+    const footerBtn = document.getElementById('hitomi-start-btn-footer');
 
-    if (progressCard) progressCard.style.display = 'flex';
+    if (progressCard) {
+      progressCard.style.display = 'flex';
+      setTimeout(() => {
+        progressCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 50);
+    }
     if (startBtn) startBtn.disabled = true;
+    if (footerBtn) footerBtn.disabled = true;
 
     this.hitomiAbortController = new AbortController();
     const signal = this.hitomiAbortController.signal;
@@ -2290,6 +2325,7 @@ class KhoTruyen {
     } finally {
       this.hitomiAbortController = null;
       if (startBtn) startBtn.disabled = false;
+      if (footerBtn) footerBtn.disabled = false;
     }
   }
 

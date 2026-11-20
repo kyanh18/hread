@@ -536,7 +536,7 @@
           <button class="modal-close-btn" onclick="app.closeHitomiModal()" aria-label="Đóng">✕</button>
         </div>
 
-        <div class="hitomi-modal-body">
+        <div class="hitomi-modal-body" id="hitomi-modal-body">
           <p class="modal-desc" style="color: var(--text-secondary); font-size: 0.82rem; margin-bottom: 12px; line-height: 1.45;">
             Dán đường link tác giả (đã chọn ngôn ngữ) hoặc link truyện lẻ trên Hitomi để app tự động tải thẳng vào kho truyện!
           </p>
@@ -638,6 +638,9 @@
         <div class="modal-actions-horizontal" style="margin-top: 14px;">
           <button class="btn btn-secondary" style="flex: 1;" onclick="app.closeHitomiModal()">
             Đóng
+          </button>
+          <button class="btn btn-primary" id="hitomi-start-btn-footer" style="flex: 2; display: none;" onclick="app.startHitomiDownload()">
+            🚀 Bắt đầu tải (<span id="hitomi-selected-count-footer">0</span> bộ)
           </button>
         </div>
       </div>

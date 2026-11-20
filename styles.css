@@ -1281,10 +1281,12 @@ body {
 
 /* Modal Content Large & Header */
 .modal-content-large {
-  max-height: 85vh;
-  max-height: 85dvh;
+  max-height: 90vh;
+  max-height: 90dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  padding: 20px 18px 16px 18px;
 }
 
 .modal-header-row {
@@ -1338,6 +1340,7 @@ body {
   margin-top: auto;
   padding-top: 14px;
   border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 /* Category Selection Section */
@@ -1827,6 +1830,15 @@ img {
 }
 
 /* ==================== HITOMI MODAL STYLES ==================== */
+.hitomi-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
 .hitomi-input-row {
   display: flex;
   gap: 8px;
@@ -1860,8 +1872,10 @@ img {
 }
 
 .hitomi-gallery-list {
-  max-height: 280px;
+  max-height: 240px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 8px;
