@@ -256,7 +256,39 @@ body {
   cursor: pointer;
   transition: var(--transition-fast);
   flex-shrink: 0;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
   margin-top: 2px;
+}
+
+.hero-hitomi-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.25), rgba(253, 121, 168, 0.2));
+  border: 1px solid rgba(108, 92, 231, 0.4);
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.hero-hitomi-btn:hover {
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.35), rgba(253, 121, 168, 0.3));
+  border-color: var(--accent-light);
+}
+
+.hero-hitomi-btn:active {
+  transform: scale(0.95);
 }
 
 .hero-backup-btn:active {
@@ -291,6 +323,21 @@ body {
 .stat-badge .stat-num {
   font-weight: 700;
   color: var(--accent-light);
+}
+
+.storage-stat-badge {
+  cursor: pointer;
+  transition: var(--transition-fast);
+  user-select: none;
+}
+
+.storage-stat-badge:hover {
+  border-color: var(--accent);
+  background: var(--bg-card-hover);
+}
+
+.storage-stat-badge:active {
+  transform: scale(0.96);
 }
 
 /* Search Bar */
@@ -665,6 +712,36 @@ body {
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--accent-light);
+  white-space: nowrap;
+}
+
+.fab-hitomi {
+  padding: 8px 16px;
+  height: 38px;
+  border-radius: 20px;
+  background: var(--bg-card);
+  border: 1px solid rgba(253, 121, 168, 0.4);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: var(--shadow-md);
+  transition: var(--transition-fast);
+}
+
+.fab-hitomi:active {
+  transform: scale(0.94);
+  background: rgba(253, 121, 168, 0.2);
+}
+
+.fab-hitomi .fab-icon {
+  font-size: 0.95rem;
+}
+
+.fab-hitomi .fab-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #fd79a8;
   white-space: nowrap;
 }
 
@@ -1410,6 +1487,74 @@ body {
   padding-right: 2px;
 }
 
+/* Storage Protection & Capacity */
+.storage-card {
+  background: linear-gradient(180deg, var(--bg-card), rgba(26, 26, 46, 0.95));
+  border-color: rgba(108, 92, 231, 0.25);
+}
+
+.storage-shield-pill {
+  font-size: 0.72rem;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  letter-spacing: 0.2px;
+}
+
+.storage-shield-pill.persisted {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid rgba(81, 207, 102, 0.35);
+}
+
+.storage-shield-pill.warning {
+  background: rgba(255, 171, 0, 0.12);
+  color: #ffab00;
+  border: 1px solid rgba(255, 171, 0, 0.35);
+}
+
+.storage-meter-section {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.storage-meter-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.storage-meter-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.storage-meter-bar-fill {
+  height: 100%;
+  background: var(--accent-gradient);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.storage-meter-bar-fill.warning {
+  background: linear-gradient(135deg, #ffab00, #ff9100);
+}
+
+.storage-meter-bar-fill.danger {
+  background: linear-gradient(135deg, #ff6b6b, #fa5252);
+}
+
 .backup-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -1679,4 +1824,100 @@ img {
   animation: storyCardGlow 1.8s ease-out;
   outline: 2px solid var(--accent) !important;
   outline-offset: 2px;
+}
+
+/* ==================== HITOMI MODAL STYLES ==================== */
+.hitomi-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.hitomi-input-row input {
+  flex: 1;
+}
+
+.hitomi-paste-btn {
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.hitomi-proxy-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.hitomi-proxy-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.hitomi-gallery-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-right: 2px;
+}
+
+.hitomi-gallery-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.hitomi-gallery-item:hover {
+  border-color: var(--accent);
+  background: var(--bg-card-hover);
+}
+
+.hitomi-gallery-item.selected {
+  border-color: rgba(253, 121, 168, 0.5);
+  background: rgba(253, 121, 168, 0.08);
+}
+
+.hitomi-gallery-thumb {
+  width: 44px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.hitomi-gallery-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.hitomi-gallery-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hitomi-gallery-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  display: flex;
+  gap: 8px;
 }

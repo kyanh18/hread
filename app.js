@@ -172,6 +172,13 @@ class KhoTruyen {
     this.batchDetectedFolders = [];
     this.lastLibraryScrollY = 0;
     this.lastViewedStoryId = null;
+    this.isStoragePersisted = false;
+    this.storageEstimate = { usage: 0, quota: 0, percent: 0 };
+    this.hitomiProxyUrl = localStorage.getItem('khotruyen_hitomi_proxy') || '';
+    this.hitomiScannedGalleries = [];
+    this.hitomiSelectedGalleryIds = new Set();
+    this.hitomiAbortController = null;
+    this.hitomiScannedTitle = '';
   }
 
   createManagedUrl(blobOrData) {
@@ -194,10 +201,131 @@ class KhoTruyen {
 
   async init() {
     await this.db.init();
+    await this.checkAndRequestPersistence();
     this.bindEvents();
     this.showScreen('library');
-    this.loadLibrary();
+    await this.loadLibrary();
     this.registerSW();
+    this.updateStorageUI();
+  }
+
+  // ==================== STORAGE PERSISTENCE & MONITORING ====================
+  async checkAndRequestPersistence() {
+    if (navigator.storage && navigator.storage.persist) {
+      try {
+        let isPersisted = await navigator.storage.persisted();
+        if (!isPersisted) {
+          isPersisted = await navigator.storage.persist();
+        }
+        this.isStoragePersisted = !!isPersisted;
+      } catch (err) {
+        console.warn('Could not check storage persistence:', err);
+        this.isStoragePersisted = false;
+      }
+    }
+  }
+
+  async requestPersistenceManually() {
+    if (navigator.storage && navigator.storage.persist) {
+      try {
+        const granted = await navigator.storage.persist();
+        this.isStoragePersisted = !!granted;
+        if (granted) {
+          this.showToast('Đã kích hoạt bảo vệ lưu trữ vĩnh viễn ✓', 'success');
+        } else {
+          this.showToast('Trình duyệt chưa cấp quyền. Hãy cài đặt app ra màn hình chính!', 'error');
+        }
+        await this.updateStorageUI();
+      } catch (e) {
+        this.showToast('Không thể xin quyền: ' + e.message, 'error');
+      }
+    } else {
+      this.showToast('Trình duyệt không hỗ trợ Persistent Storage API!', 'error');
+    }
+  }
+
+  async updateStorageUI() {
+    let usageFormatted = '0 MB';
+    let quotaFormatted = 'Không rõ';
+    let percent = 0;
+    let isPersisted = this.isStoragePersisted;
+
+    if (navigator.storage) {
+      if (navigator.storage.persisted) {
+        try {
+          isPersisted = await navigator.storage.persisted();
+          this.isStoragePersisted = isPersisted;
+        } catch (e) {}
+      }
+
+      if (navigator.storage.estimate) {
+        try {
+          const estimate = await navigator.storage.estimate();
+          const usageMB = (estimate.usage || 0) / (1024 * 1024);
+          const quotaMB = (estimate.quota || 0) / (1024 * 1024);
+
+          if (usageMB >= 1024) {
+            usageFormatted = `${(usageMB / 1024).toFixed(1)} GB`;
+          } else {
+            usageFormatted = `${usageMB.toFixed(1)} MB`;
+          }
+
+          if (quotaMB >= 1024) {
+            quotaFormatted = `${(quotaMB / 1024).toFixed(1)} GB`;
+          } else {
+            quotaFormatted = `${Math.round(quotaMB)} MB`;
+          }
+
+          percent = quotaMB > 0 ? Math.min(100, Math.round((usageMB / quotaMB) * 100)) : 0;
+          this.storageEstimate = { usage: estimate.usage || 0, quota: estimate.quota || 0, percent };
+        } catch (e) {}
+      }
+    }
+
+    // Update hero badge
+    const heroStatus = document.getElementById('hero-storage-status');
+    if (heroStatus) {
+      heroStatus.innerHTML = isPersisted
+        ? `🛡️ Vĩnh viễn (${usageFormatted})`
+        : `⚠️ Tạm thời (${usageFormatted})`;
+      heroStatus.title = isPersisted
+        ? `Đã bật bảo vệ vĩnh viễn. Đã dùng: ${usageFormatted} / ${quotaFormatted}`
+        : `Chưa bật bảo vệ vĩnh viễn! Bấm vào để khoá bảo vệ`;
+    }
+
+    // Update backup modal card
+    const pill = document.getElementById('storage-shield-pill');
+    const desc = document.getElementById('storage-shield-desc');
+    const persistBtn = document.getElementById('storage-persist-btn');
+    const icon = document.getElementById('storage-status-icon');
+    const usageText = document.getElementById('storage-usage-text');
+    const percentText = document.getElementById('storage-percent-text');
+    const barFill = document.getElementById('storage-meter-bar-fill');
+
+    if (pill) {
+      if (isPersisted) {
+        pill.className = 'storage-shield-pill persisted';
+        pill.innerHTML = '🛡️ Đã khoá bảo vệ';
+        if (desc) desc.textContent = 'Dữ liệu truyện đã được khoá an toàn. Chrome và điện thoại sẽ không bao giờ tự ý xoá.';
+        if (persistBtn) persistBtn.style.display = 'none';
+        if (icon) icon.textContent = '🛡️';
+      } else {
+        pill.className = 'storage-shield-pill warning';
+        pill.innerHTML = '⚠️ Bộ nhớ tạm';
+        if (desc) desc.textContent = 'Trình duyệt có thể tự xoá truyện khi máy gần hết bộ nhớ. Hãy bấm nút bên dưới để khoá bảo vệ!';
+        if (persistBtn) persistBtn.style.display = 'flex';
+        if (icon) icon.textContent = '⚠️';
+      }
+    }
+
+    if (usageText) usageText.textContent = `Đã dùng: ${usageFormatted} / ${quotaFormatted}`;
+    if (percentText) percentText.textContent = `${percent}%`;
+    if (barFill) {
+      barFill.style.width = `${Math.max(1, percent)}%`;
+      barFill.className = 'storage-meter-bar-fill';
+      if (percent > 85) barFill.classList.add('danger');
+      else if (percent > 70) barFill.classList.add('warning');
+    }
   }
 
   registerSW() {
@@ -267,6 +395,18 @@ class KhoTruyen {
     // Update stats
     const statsEl = document.getElementById('library-stats');
     const totalImages = allStories.reduce((sum, s) => sum + (s.imageCount || 0), 0);
+    const storageUsage = this.storageEstimate?.usage
+      ? (this.storageEstimate.usage >= 1024 * 1024 * 1024 
+          ? `${(this.storageEstimate.usage / (1024 * 1024 * 1024)).toFixed(1)} GB`
+          : `${(this.storageEstimate.usage / (1024 * 1024)).toFixed(0)} MB`)
+      : '0 MB';
+
+    const storageBadgeHtml = `
+      <div class="stat-badge storage-stat-badge" onclick="app.openBackupModal()" title="Xem trạng thái bảo vệ & bộ nhớ">
+        <span class="stat-num" id="hero-storage-status">${this.isStoragePersisted ? `🛡️ Vĩnh viễn (${storageUsage})` : `⚠️ Tạm thời (${storageUsage})`}</span>
+      </div>
+    `;
+
     if (this.selectedCategoryId === 'all') {
       statsEl.innerHTML = `
         <div class="stat-badge">
@@ -275,6 +415,7 @@ class KhoTruyen {
         <div class="stat-badge">
           <span class="stat-num">${totalImages}</span> ảnh
         </div>
+        ${storageBadgeHtml}
       `;
     } else {
       statsEl.innerHTML = `
@@ -284,6 +425,7 @@ class KhoTruyen {
         <div class="stat-badge">
           <span class="stat-num">${this.categories.length}</span> danh mục
         </div>
+        ${storageBadgeHtml}
       `;
     }
 
@@ -671,39 +813,49 @@ class KhoTruyen {
     const storyId = this.currentStory ? this.currentStory.id : this.generateId();
     const now = Date.now();
 
-    // Generate cover from first image (thumbnail)
-    const coverData = await this.generateThumbnail(this.editImages[0].data, 300, 400);
+    try {
+      // Generate cover from first image (thumbnail)
+      const coverData = await this.generateThumbnail(this.editImages[0].data, 300, 400);
 
-    const story = {
-      id: storyId,
-      name: name,
-      coverData: coverData,
-      imageCount: this.editImages.length,
-      createdAt: this.currentStory ? this.currentStory.createdAt : now,
-      updatedAt: now,
-    };
+      const story = {
+        id: storyId,
+        name: name,
+        coverData: coverData,
+        imageCount: this.editImages.length,
+        createdAt: this.currentStory ? this.currentStory.createdAt : now,
+        updatedAt: now,
+      };
 
-    await this.db.addStory(story);
+      await this.db.addStory(story);
 
-    // Clear old images if editing
-    if (this.currentStory) {
-      await this.db.clearStoryImages(storyId);
+      // Clear old images if editing
+      if (this.currentStory) {
+        await this.db.clearStoryImages(storyId);
+      }
+
+      // Save images
+      for (let i = 0; i < this.editImages.length; i++) {
+        await this.db.addImage({
+          id: this.editImages[i].id || this.generateId(),
+          storyId: storyId,
+          name: this.editImages[i].name,
+          data: this.editImages[i].data,
+          order: i,
+        });
+      }
+
+      this.showToast(this.currentStory ? 'Đã cập nhật truyện ✓' : 'Đã tạo truyện mới ✓', 'success');
+      this.showScreen('library');
+      await this.loadLibrary();
+      this.updateStorageUI();
+    } catch (err) {
+      console.error('Save story error:', err);
+      if (err.name === 'QuotaExceededError' || err.message?.toLowerCase().includes('quota')) {
+        alert('Bộ nhớ điện thoại / trình duyệt đã đầy (QuotaExceededError)! Vui lòng xoá bớt truyện hoặc xuất file sao lưu trước khi lưu thêm.');
+      } else {
+        this.showToast('Lỗi khi lưu truyện: ' + err.message, 'error');
+      }
     }
-
-    // Save images
-    for (let i = 0; i < this.editImages.length; i++) {
-      await this.db.addImage({
-        id: this.editImages[i].id || this.generateId(),
-        storyId: storyId,
-        name: this.editImages[i].name,
-        data: this.editImages[i].data,
-        order: i,
-      });
-    }
-
-    this.showToast(this.currentStory ? 'Đã cập nhật truyện ✓' : 'Đã tạo truyện mới ✓', 'success');
-    this.showScreen('library');
-    this.loadLibrary();
   }
 
   async generateThumbnail(dataOrBlob, maxW, maxH) {
@@ -745,7 +897,8 @@ class KhoTruyen {
     this.showToast('Đã xoá truyện ✓', 'success');
     this.closeModal();
     this.showScreen('library');
-    this.loadLibrary();
+    await this.loadLibrary();
+    this.updateStorageUI();
   }
 
   // ==================== READER ====================
@@ -1226,10 +1379,11 @@ class KhoTruyen {
   }
 
   // ==================== BACKUP & RESTORE ====================
-  openBackupModal() {
+  async openBackupModal() {
     const modal = document.getElementById('backup-modal-overlay');
     if (modal) modal.style.display = 'flex';
     this.hideBackupProgress();
+    await this.updateStorageUI();
   }
 
   closeBackupModal() {
@@ -1413,6 +1567,7 @@ class KhoTruyen {
 
       this.showBackupProgress('Khôi phục hoàn tất!', 100);
       await this.loadLibrary();
+      await this.updateStorageUI();
       this.showToast(`Khôi phục thành công ${data.stories.length} truyện ✓`, 'success');
 
       setTimeout(() => {
@@ -1658,10 +1813,482 @@ class KhoTruyen {
       setTimeout(async () => {
         this.closeBatchModal();
         await this.loadLibrary();
+        await this.updateStorageUI();
       }, 1000);
     } catch (err) {
       console.error('Batch import error:', err);
-      this.showToast('Lỗi khi tạo hàng loạt: ' + err.message, 'error');
+      if (err.name === 'QuotaExceededError' || err.message?.toLowerCase().includes('quota')) {
+        alert('Bộ nhớ điện thoại / trình duyệt đã đầy (QuotaExceededError)! Quá trình tạo truyện phải dừng lại.');
+      } else {
+        this.showToast('Lỗi khi tạo hàng loạt: ' + err.message, 'error');
+      }
+      if (startBtn) startBtn.disabled = false;
+    }
+  }
+
+  // ==================== HITOMI DOWNLOADER ====================
+  async openHitomiModal() {
+    this.hitomiScannedGalleries = [];
+    this.hitomiSelectedGalleryIds.clear();
+    this.hitomiScannedTitle = '';
+
+    const proxyInput = document.getElementById('hitomi-proxy-url-input');
+    if (proxyInput) proxyInput.value = this.hitomiProxyUrl;
+
+    const proxyBody = document.getElementById('hitomi-proxy-body');
+    const proxyArrow = document.getElementById('hitomi-proxy-toggle-arrow');
+    // If no proxy set, open settings automatically so user sees it
+    if (!this.hitomiProxyUrl && proxyBody) {
+      proxyBody.style.display = 'block';
+      if (proxyArrow) proxyArrow.style.transform = 'rotate(180deg)';
+    }
+
+    const previewSec = document.getElementById('hitomi-preview-section');
+    if (previewSec) previewSec.style.display = 'none';
+
+    const progressCard = document.getElementById('hitomi-progress-card');
+    if (progressCard) progressCard.style.display = 'none';
+
+    const scanBtn = document.getElementById('hitomi-scan-btn');
+    if (scanBtn) scanBtn.disabled = false;
+
+    // Populate category dropdown
+    this.categories = await this.db.getAllCategories();
+    const select = document.getElementById('hitomi-category-select');
+    if (select) {
+      let html = `
+        <option value="">-- Tự tạo danh mục theo tên tác giả --</option>
+        <option value="_none_">-- Không gán danh mục --</option>
+      `;
+      for (const cat of this.categories) {
+        html += `<option value="${cat.id}">📁 ${this.escapeHTML(cat.name)}</option>`;
+      }
+      select.innerHTML = html;
+    }
+
+    const modal = document.getElementById('hitomi-modal-overlay');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  closeHitomiModal() {
+    if (this.hitomiAbortController) {
+      if (!confirm('Quá trình tải đang diễn ra. Bạn có chắc muốn dừng lại không?')) {
+        return;
+      }
+      this.cancelHitomiDownload();
+    }
+    const modal = document.getElementById('hitomi-modal-overlay');
+    if (modal) modal.style.display = 'none';
+  }
+
+  toggleHitomiProxySettings() {
+    const body = document.getElementById('hitomi-proxy-body');
+    const arrow = document.getElementById('hitomi-proxy-toggle-arrow');
+    if (body) {
+      const isHidden = body.style.display === 'none';
+      body.style.display = isHidden ? 'block' : 'none';
+      if (arrow) arrow.style.transform = isHidden ? 'rotate(180deg)' : 'none';
+    }
+  }
+
+  async testHitomiProxy() {
+    const input = document.getElementById('hitomi-proxy-url-input');
+    let url = input ? input.value.trim().replace(/\/+$/, '') : '';
+    const statusEl = document.getElementById('hitomi-proxy-status');
+
+    if (!url) {
+      this.showToast('Vui lòng nhập địa chỉ Worker!', 'error');
+      return;
+    }
+
+    if (!url.startsWith('http')) {
+      url = 'https://' + url;
+      if (input) input.value = url;
+    }
+
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.style.color = 'var(--text-muted)';
+      statusEl.textContent = 'Đang kiểm tra kết nối...';
+    }
+
+    try {
+      const res = await fetch(`${url}/api/ping`, { signal: AbortSignal.timeout(6000) });
+      const data = await res.json();
+      if (data && data.status === 'ok') {
+        this.hitomiProxyUrl = url;
+        localStorage.setItem('khotruyen_hitomi_proxy', url);
+        if (statusEl) {
+          statusEl.style.color = 'var(--success)';
+          statusEl.textContent = '✓ Kết nối Worker thành công! Đã lưu cài đặt.';
+        }
+        this.showToast('Đã lưu cấu hình Proxy Worker ✓', 'success');
+      } else {
+        throw new Error('Worker phản hồi không hợp lệ');
+      }
+    } catch (e) {
+      if (statusEl) {
+        statusEl.style.color = 'var(--danger)';
+        statusEl.textContent = `✕ Không thể kết nối: ${e.message}. Hãy kiểm tra lại URL!`;
+      }
+    }
+  }
+
+  async pasteHitomiUrl() {
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          const input = document.getElementById('hitomi-url-input');
+          if (input) {
+            input.value = text.trim();
+            this.showToast('Đã dán link từ bộ nhớ tạm ✓', 'success');
+          }
+          return;
+        }
+      }
+      this.showToast('Hãy bấm giữ vào ô và chọn Dán', 'info');
+    } catch (e) {
+      this.showToast('Hãy bấm giữ vào ô và chọn Dán', 'info');
+    }
+  }
+
+  async scanHitomiUrl() {
+    const urlInput = document.getElementById('hitomi-url-input');
+    const proxyInput = document.getElementById('hitomi-proxy-url-input');
+    const rawUrl = urlInput ? urlInput.value.trim() : '';
+
+    if (!rawUrl) {
+      this.showToast('Vui lòng nhập hoặc dán đường link Hitomi!', 'error');
+      if (urlInput) urlInput.focus();
+      return;
+    }
+
+    // Save proxy url if typed
+    if (proxyInput && proxyInput.value.trim()) {
+      let pUrl = proxyInput.value.trim().replace(/\/+$/, '');
+      if (!pUrl.startsWith('http')) pUrl = 'https://' + pUrl;
+      this.hitomiProxyUrl = pUrl;
+      localStorage.setItem('khotruyen_hitomi_proxy', pUrl);
+    }
+
+    if (!this.hitomiProxyUrl) {
+      this.toggleHitomiProxySettings();
+      alert('Bạn chưa cài đặt địa chỉ Cloudflare Worker làm Proxy! Hãy xem hướng dẫn trong thư mục "cloudflare-worker/" hoặc dán URL Worker vào ô Cấu hình bên trên.');
+      return;
+    }
+
+    const spinner = document.getElementById('hitomi-scan-spinner');
+    const btnText = document.getElementById('hitomi-scan-btn-text');
+    const scanBtn = document.getElementById('hitomi-scan-btn');
+    const previewSec = document.getElementById('hitomi-preview-section');
+
+    if (spinner) spinner.style.display = 'inline-block';
+    if (btnText) btnText.textContent = 'Đang quét dữ liệu...';
+    if (scanBtn) scanBtn.disabled = true;
+
+    try {
+      const res = await fetch(`${this.hitomiProxyUrl}/api/parse?url=${encodeURIComponent(rawUrl)}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Lỗi máy chủ HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      this.hitomiScannedGalleries = [];
+      this.hitomiSelectedGalleryIds.clear();
+
+      if (data.type === 'single') {
+        this.hitomiScannedGalleries = [data.gallery];
+        this.hitomiSelectedGalleryIds.add(data.gallery.id);
+        this.hitomiScannedTitle = data.gallery.title;
+      } else if (data.type === 'collection') {
+        this.hitomiScannedGalleries = data.galleries || [];
+        this.hitomiScannedGalleries.forEach((g) => this.hitomiSelectedGalleryIds.add(g.id));
+        this.hitomiScannedTitle = data.pageTitle || 'Hitomi Collection';
+      }
+
+      if (this.hitomiScannedGalleries.length === 0) {
+        this.showToast('Không tìm thấy bộ truyện nào từ link này!', 'error');
+        if (previewSec) previewSec.style.display = 'none';
+        return;
+      }
+
+      this.renderHitomiGalleryList();
+      if (previewSec) previewSec.style.display = 'block';
+
+      this.showToast(`Tìm thấy ${this.hitomiScannedGalleries.length} bộ truyện! ✓`, 'success');
+    } catch (err) {
+      console.error('Hitomi scan error:', err);
+      alert('Lỗi khi quét link Hitomi: ' + err.message + '\n\nLưu ý: Đảm bảo bạn đã triển khai Cloudflare Worker và nhập đúng link Worker.');
+    } finally {
+      if (spinner) spinner.style.display = 'none';
+      if (btnText) btnText.textContent = '🔍 Quét link & Lấy danh sách';
+      if (scanBtn) scanBtn.disabled = false;
+    }
+  }
+
+  renderHitomiGalleryList() {
+    const list = document.getElementById('hitomi-gallery-list');
+    const summary = document.getElementById('hitomi-preview-summary');
+    const subtitle = document.getElementById('hitomi-preview-subtitle');
+    const countEl = document.getElementById('hitomi-selected-count');
+
+    if (summary) summary.textContent = `Tìm thấy ${this.hitomiScannedGalleries.length} bộ truyện`;
+    if (subtitle) subtitle.textContent = this.hitomiScannedTitle;
+    if (countEl) countEl.textContent = this.hitomiSelectedGalleryIds.size;
+
+    if (!list) return;
+
+    list.innerHTML = this.hitomiScannedGalleries
+      .map((gallery) => {
+        const isSelected = this.hitomiSelectedGalleryIds.has(gallery.id);
+        return `
+          <div class="hitomi-gallery-item ${isSelected ? 'selected' : ''}" data-id="${gallery.id}" onclick="app.toggleHitomiGallerySelection('${gallery.id}')">
+            <div class="custom-checkbox ${isSelected ? 'checked' : ''}" style="margin-right: 2px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </div>
+            <div class="hitomi-gallery-info">
+              <div class="hitomi-gallery-title" title="${this.escapeHTML(gallery.title)}">${this.escapeHTML(gallery.title)}</div>
+              <div class="hitomi-gallery-meta">
+                <span>Mã: #${gallery.id}</span>
+                ${gallery.pageCount ? `<span>🖼️ ${gallery.pageCount} trang</span>` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  toggleHitomiGallerySelection(id) {
+    if (this.hitomiSelectedGalleryIds.has(id)) {
+      this.hitomiSelectedGalleryIds.delete(id);
+    } else {
+      this.hitomiSelectedGalleryIds.add(id);
+    }
+
+    const item = document.querySelector(`.hitomi-gallery-item[data-id="${id}"]`);
+    if (item) {
+      if (this.hitomiSelectedGalleryIds.has(id)) {
+        item.classList.add('selected');
+        item.querySelector('.custom-checkbox')?.classList.add('checked');
+      } else {
+        item.classList.remove('selected');
+        item.querySelector('.custom-checkbox')?.classList.remove('checked');
+      }
+    }
+
+    const countEl = document.getElementById('hitomi-selected-count');
+    if (countEl) countEl.textContent = this.hitomiSelectedGalleryIds.size;
+  }
+
+  selectAllHitomiGalleries(selectAll) {
+    if (selectAll) {
+      this.hitomiScannedGalleries.forEach((g) => this.hitomiSelectedGalleryIds.add(g.id));
+    } else {
+      this.hitomiSelectedGalleryIds.clear();
+    }
+    this.renderHitomiGalleryList();
+  }
+
+  cancelHitomiDownload() {
+    if (this.hitomiAbortController) {
+      this.hitomiAbortController.abort();
+      this.hitomiAbortController = null;
+      this.showToast('Đã dừng tải truyện.', 'info');
+      const progressCard = document.getElementById('hitomi-progress-card');
+      if (progressCard) progressCard.style.display = 'none';
+      const startBtn = document.getElementById('hitomi-start-btn');
+      if (startBtn) startBtn.disabled = false;
+    }
+  }
+
+  async startHitomiDownload() {
+    const selectedGalleries = this.hitomiScannedGalleries.filter((g) =>
+      this.hitomiSelectedGalleryIds.has(g.id)
+    );
+
+    if (selectedGalleries.length === 0) {
+      this.showToast('Vui lòng chọn ít nhất 1 bộ truyện để tải!', 'error');
+      return;
+    }
+
+    const selectedCatId = document.getElementById('hitomi-category-select')?.value;
+    const progressCard = document.getElementById('hitomi-progress-card');
+    const statusText = document.getElementById('hitomi-status-text');
+    const detailText = document.getElementById('hitomi-detail-status-text');
+    const percentText = document.getElementById('hitomi-percent-text');
+    const fillEl = document.getElementById('hitomi-progress-fill');
+    const startBtn = document.getElementById('hitomi-start-btn');
+
+    if (progressCard) progressCard.style.display = 'flex';
+    if (startBtn) startBtn.disabled = true;
+
+    this.hitomiAbortController = new AbortController();
+    const signal = this.hitomiAbortController.signal;
+
+    let completedGalleries = 0;
+    const totalGalleries = selectedGalleries.length;
+    let createdStoryIds = [];
+    let detectedArtistName = '';
+
+    try {
+      for (let gIdx = 0; gIdx < totalGalleries; gIdx++) {
+        if (signal.aborted) break;
+
+        const gItem = selectedGalleries[gIdx];
+        if (statusText) statusText.textContent = `[${gIdx + 1}/${totalGalleries}] Đang lấy thông tin: ${gItem.title}...`;
+        if (detailText) detailText.textContent = 'Đang phân giải danh sách ảnh...';
+
+        // 1. Fetch gallery details
+        const gRes = await fetch(`${this.hitomiProxyUrl}/api/gallery?id=${gItem.id}`, { signal });
+        if (!gRes.ok) {
+          console.warn(`Could not load details for gallery #${gItem.id}`);
+          continue;
+        }
+
+        const galleryData = await gRes.json();
+        const imagesList = galleryData.images || [];
+
+        if (imagesList.length === 0) {
+          console.warn(`Gallery #${gItem.id} has no images`);
+          continue;
+        }
+
+        if (galleryData.artists && galleryData.artists.length > 0 && !detectedArtistName) {
+          detectedArtistName = galleryData.artists[0];
+        }
+
+        const storyId = this.generateId();
+        const now = Date.now();
+        const totalImages = imagesList.length;
+        let downloadedBlobs = [];
+
+        // 2. Download all images sequentially
+        for (let imgIdx = 0; imgIdx < totalImages; imgIdx++) {
+          if (signal.aborted) break;
+
+          const imgObj = imagesList[imgIdx];
+          const imgPercent = Math.round(((imgIdx + 1) / totalImages) * 100);
+          const overallPercent = Math.round(((gIdx + (imgIdx / totalImages)) / totalGalleries) * 100);
+
+          if (statusText) statusText.textContent = `[${gIdx + 1}/${totalGalleries}] ${galleryData.title}`;
+          if (detailText) detailText.textContent = `Đang tải trang ${imgIdx + 1} / ${totalImages} (${imgPercent}%)`;
+          if (percentText) percentText.textContent = `${overallPercent}%`;
+          if (fillEl) fillEl.style.width = `${overallPercent}%`;
+
+          // Download image blob via proxy
+          const imgFetchUrl = `${this.hitomiProxyUrl}/api/image?url=${encodeURIComponent(imgObj.url)}&id=${gItem.id}`;
+          const imgBlobRes = await fetch(imgFetchUrl, { signal });
+          if (!imgBlobRes.ok) {
+            throw new Error(`Lỗi tải trang ${imgIdx + 1}: HTTP ${imgBlobRes.status}`);
+          }
+
+          const blob = await imgBlobRes.blob();
+          downloadedBlobs.push({
+            order: imgIdx,
+            name: imgObj.name || `Trang ${imgIdx + 1}`,
+            data: blob,
+          });
+
+          // Save image to IndexedDB
+          await this.db.addImage({
+            id: this.generateId(),
+            storyId: storyId,
+            name: imgObj.name || `Trang ${imgIdx + 1}`,
+            data: blob,
+            order: imgIdx,
+          });
+        }
+
+        if (signal.aborted) {
+          await this.db.deleteStory(storyId);
+          break;
+        }
+
+        // 3. Create thumbnail cover from 1st image
+        let coverData = '';
+        if (downloadedBlobs.length > 0) {
+          try {
+            coverData = await this.generateThumbnail(downloadedBlobs[0].data, 300, 400);
+          } catch (e) {
+            console.warn('Could not generate cover for hitomi story:', galleryData.title);
+          }
+        }
+
+        // 4. Save story metadata
+        const story = {
+          id: storyId,
+          name: galleryData.title || gItem.title,
+          coverData: coverData,
+          imageCount: downloadedBlobs.length,
+          createdAt: now + gIdx,
+          updatedAt: now + gIdx,
+        };
+
+        await this.db.addStory(story);
+        createdStoryIds.push(storyId);
+        completedGalleries++;
+      }
+
+      if (!signal.aborted && completedGalleries > 0) {
+        // Handle Category Assignment
+        if (selectedCatId === '') {
+          // Auto create category by artist name or page title
+          const catName = detectedArtistName ? `Tác giả: ${detectedArtistName}` : (this.hitomiScannedTitle || 'Hitomi');
+          let cat = this.categories.find((c) => c.name.toLowerCase() === catName.toLowerCase());
+          if (!cat) {
+            cat = {
+              id: 'cat_' + this.generateId(),
+              name: catName,
+              storyIds: [...createdStoryIds],
+              createdAt: Date.now(),
+            };
+          } else {
+            cat.storyIds = Array.from(new Set([...(cat.storyIds || []), ...createdStoryIds]));
+            cat.updatedAt = Date.now();
+          }
+          await this.db.addCategory(cat);
+          this.selectedCategoryId = cat.id; // switch view
+        } else if (selectedCatId !== '_none_') {
+          const cat = this.categories.find((c) => c.id === selectedCatId);
+          if (cat) {
+            cat.storyIds = Array.from(new Set([...(cat.storyIds || []), ...createdStoryIds]));
+            cat.updatedAt = Date.now();
+            await this.db.addCategory(cat);
+            this.selectedCategoryId = cat.id;
+          }
+        }
+
+        if (fillEl) fillEl.style.width = '100%';
+        if (percentText) percentText.textContent = '100%';
+        if (statusText) statusText.textContent = 'Hoàn tất tải về!';
+        if (detailText) detailText.textContent = `Đã lưu an toàn ${completedGalleries} bộ truyện vào kho!`;
+
+        this.showToast(`Đã tải thành công ${completedGalleries} bộ truyện vào app ✓`, 'success');
+
+        setTimeout(async () => {
+          this.closeHitomiModal();
+          await this.loadLibrary();
+          await this.updateStorageUI();
+        }, 1200);
+      }
+    } catch (err) {
+      if (signal.aborted) {
+        console.log('Download aborted by user');
+      } else {
+        console.error('Hitomi download error:', err);
+        if (err.name === 'QuotaExceededError' || err.message?.toLowerCase().includes('quota')) {
+          alert('Bộ nhớ điện thoại / trình duyệt đã đầy (QuotaExceededError)! Hãy xoá bớt truyện hoặc sao lưu trước khi tải tiếp.');
+        } else {
+          this.showToast('Lỗi khi tải truyện: ' + err.message, 'error');
+        }
+      }
+    } finally {
+      this.hitomiAbortController = null;
       if (startBtn) startBtn.disabled = false;
     }
   }
@@ -1803,6 +2430,12 @@ class KhoTruyen {
       }
     });
 
+    document.getElementById('hitomi-modal-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        this.closeHitomiModal();
+      }
+    });
+
     // Mobile back gesture / hardware back button support
     window.addEventListener('popstate', (e) => {
       const readerScreen = document.getElementById('screen-reader');
@@ -1824,6 +2457,7 @@ class KhoTruyen {
         this.closeStoryCategoryModal();
         this.closeBackupModal();
         this.closeBatchModal();
+        this.closeHitomiModal();
       }
     });
   }

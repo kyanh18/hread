@@ -23,18 +23,27 @@
             <h1>📖 Kho Truyện</h1>
             <p>Bộ sưu tập truyện tranh của bạn</p>
           </div>
-          <button class="hero-backup-btn" onclick="app.openBackupModal()" aria-label="Sao lưu và Khôi phục">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-              <polyline points="17 21 17 13 7 13 7 21"></polyline>
-              <polyline points="7 3 7 8 15 8"></polyline>
-            </svg>
-            <span>Sao lưu</span>
-          </button>
+          <div class="hero-actions">
+            <button class="hero-hitomi-btn" onclick="app.openHitomiModal()" aria-label="Tải từ Hitomi" title="Tải online từ Hitomi">
+              <span style="font-size: 1rem;">🌐</span>
+              <span>Hitomi</span>
+            </button>
+            <button class="hero-backup-btn" onclick="app.openBackupModal()" aria-label="Sao lưu và Khôi phục">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+              </svg>
+              <span>Sao lưu</span>
+            </button>
+          </div>
         </div>
         <div class="library-stats" id="library-stats">
           <div class="stat-badge"><span class="stat-num">0</span> truyện</div>
           <div class="stat-badge"><span class="stat-num">0</span> ảnh</div>
+          <div class="stat-badge storage-stat-badge" id="hero-storage-badge" onclick="app.openBackupModal()" title="Xem trạng thái bảo vệ & bộ nhớ">
+            <span class="stat-num" id="hero-storage-status">🛡️ Đang kiểm tra...</span>
+          </div>
         </div>
       </div>
 
@@ -91,6 +100,10 @@
       </div>
 
       <div class="fab-group">
+        <button class="fab fab-hitomi" onclick="app.openHitomiModal()" id="fab-hitomi" aria-label="Tải từ Hitomi" title="Tải từ Hitomi">
+          <span class="fab-icon">🌐</span>
+          <span class="fab-label">Hitomi</span>
+        </button>
         <button class="fab fab-batch" onclick="app.openBatchModal()" id="fab-batch" aria-label="Tạo hàng loạt từ thư mục lớn" title="Tạo hàng loạt từ thư mục">
           <span class="fab-icon">⚡📁</span>
           <span class="fab-label">Hàng loạt</span>
@@ -324,6 +337,40 @@
         </div>
 
         <div class="backup-sections">
+          <!-- Section 0: Storage Status & Persistent Protection -->
+          <div class="backup-card storage-card" id="storage-status-card">
+            <div class="backup-card-header">
+              <div class="backup-card-icon storage-icon" id="storage-status-icon">🛡️</div>
+              <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                  <div class="backup-card-title">Bảo vệ chống xoá & Bộ nhớ</div>
+                  <span class="storage-shield-pill" id="storage-shield-pill">Đang kiểm tra...</span>
+                </div>
+                <div class="backup-card-desc" id="storage-shield-desc">
+                  Kiểm tra xem dữ liệu có được hệ thống bảo vệ chống tự động xoá hay không.
+                </div>
+              </div>
+            </div>
+
+            <!-- Storage capacity meter -->
+            <div class="storage-meter-section">
+              <div class="storage-meter-info">
+                <span id="storage-usage-text">Đang tính toán dung lượng...</span>
+                <span id="storage-percent-text">--%</span>
+              </div>
+              <div class="storage-meter-bar-bg">
+                <div class="storage-meter-bar-fill" id="storage-meter-bar-fill" style="width: 0%;"></div>
+              </div>
+            </div>
+
+            <button class="btn btn-secondary backup-action-btn" id="storage-persist-btn" style="display: none; margin-top: 10px;" onclick="app.requestPersistenceManually()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+              <span>Khoá bảo vệ vĩnh viễn (Chống tự xoá)</span>
+            </button>
+          </div>
+
           <!-- Section 1: Export -->
           <div class="backup-card">
             <div class="backup-card-header">
@@ -474,6 +521,122 @@
 
         <div class="modal-actions-horizontal" style="margin-top: 14px;">
           <button class="btn btn-secondary" style="flex: 1;" onclick="app.closeBatchModal()">
+            Đóng
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== HITOMI DOWNLOADER MODAL ==================== -->
+    <div class="modal-overlay" id="hitomi-modal-overlay" style="display: none;">
+      <div class="modal-content modal-content-large">
+        <div class="modal-handle"></div>
+        <div class="modal-header-row">
+          <div class="modal-title">🌐 Tải truyện từ Hitomi</div>
+          <button class="modal-close-btn" onclick="app.closeHitomiModal()" aria-label="Đóng">✕</button>
+        </div>
+
+        <div class="hitomi-modal-body">
+          <p class="modal-desc" style="color: var(--text-secondary); font-size: 0.82rem; margin-bottom: 12px; line-height: 1.45;">
+            Dán đường link tác giả (đã chọn ngôn ngữ) hoặc link truyện lẻ trên Hitomi để app tự động tải thẳng vào kho truyện!
+          </p>
+
+          <!-- Proxy Settings Collapsible -->
+          <div class="hitomi-proxy-card">
+            <div class="hitomi-proxy-header" onclick="app.toggleHitomiProxySettings()">
+              <span style="font-size: 0.9rem;">⚙️</span>
+              <span style="flex: 1; font-size: 0.78rem; font-weight: 600; color: var(--text-secondary);">Cấu hình Proxy Worker</span>
+              <span id="hitomi-proxy-toggle-arrow" style="font-size: 0.72rem; color: var(--text-muted); transition: transform 0.2s;">▼</span>
+            </div>
+            <div id="hitomi-proxy-body" style="display: none; padding-top: 8px;">
+              <div style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: 6px;">
+                Địa chỉ Cloudflare Worker làm cầu nối tải truyện (xem file hướng dẫn trong thư mục <code>cloudflare-worker/</code>):
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <input type="url" class="form-input" id="hitomi-proxy-url-input" placeholder="https://my-hitomi-proxy.workers.dev" style="font-size: 0.78rem; padding: 8px 10px;">
+                <button class="btn btn-secondary" style="padding: 8px 12px; font-size: 0.76rem; flex-shrink: 0;" onclick="app.testHitomiProxy()">Kiểm tra</button>
+              </div>
+              <div id="hitomi-proxy-status" style="font-size: 0.72rem; margin-top: 4px; display: none;"></div>
+            </div>
+          </div>
+
+          <!-- URL Input Box with Paste Button -->
+          <div class="form-group" style="margin-bottom: 12px; margin-top: 10px;">
+            <label class="form-label" for="hitomi-url-input">Đường link Hitomi</label>
+            <div class="hitomi-input-row">
+              <input type="text" class="form-input" id="hitomi-url-input" placeholder="VD: https://hitomi.la/artist/abc-english.html">
+              <button type="button" class="btn btn-secondary hitomi-paste-btn" onclick="app.pasteHitomiUrl()" title="Dán từ bộ nhớ tạm">
+                📋 Dán
+              </button>
+            </div>
+          </div>
+
+          <!-- Category Selection -->
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label class="form-label" for="hitomi-category-select">Gán vào danh mục (tùy chọn)</label>
+            <select class="form-input" id="hitomi-category-select">
+              <option value="">-- Tự tạo danh mục theo tên tác giả --</option>
+              <option value="_none_">-- Không gán danh mục --</option>
+            </select>
+          </div>
+
+          <!-- Fetch / Scan Button -->
+          <button class="btn btn-primary" id="hitomi-scan-btn" style="width: 100%; padding: 12px; font-size: 0.88rem;" onclick="app.scanHitomiUrl()">
+            <span class="spinner" id="hitomi-scan-spinner" style="display: none; width: 16px; height: 16px; border-width: 2px;"></span>
+            <span id="hitomi-scan-btn-text">🔍 Quét link & Lấy danh sách</span>
+          </button>
+
+          <!-- Preview Section (hidden until scanned) -->
+          <div class="batch-preview-section" id="hitomi-preview-section" style="display: none; margin-top: 14px;">
+            <div class="batch-preview-header">
+              <div>
+                <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-primary);" id="hitomi-preview-summary">
+                  Tìm thấy 0 truyện
+                </span>
+                <div style="font-size: 0.72rem; color: var(--text-muted);" id="hitomi-preview-subtitle"></div>
+              </div>
+              <div class="category-select-quick-actions">
+                <button type="button" class="btn-text" onclick="app.selectAllHitomiGalleries(true)">Chọn hết</button>
+                <span style="color: var(--text-muted);">•</span>
+                <button type="button" class="btn-text" onclick="app.selectAllHitomiGalleries(false)">Bỏ chọn</button>
+              </div>
+            </div>
+
+            <div class="hitomi-gallery-list" id="hitomi-gallery-list">
+              <!-- Gallery items with checkboxes -->
+            </div>
+
+            <button class="btn btn-primary" id="hitomi-start-btn" style="width: 100%; margin-top: 12px; font-size: 0.88rem; padding: 12px;" onclick="app.startHitomiDownload()">
+              🚀 Bắt đầu tải về (<span id="hitomi-selected-count">0</span> bộ)
+            </button>
+          </div>
+
+          <!-- Progress Section (hidden until download starts) -->
+          <div class="backup-progress-card" id="hitomi-progress-card" style="display: none; margin-top: 14px; flex-direction: column; gap: 8px;">
+            <div class="backup-progress-info" style="display: flex; align-items: center; gap: 10px;">
+              <span class="spinner" id="hitomi-dl-spinner" style="width: 18px; height: 18px; border-width: 2px;"></span>
+              <div style="flex: 1; min-width: 0;">
+                <div id="hitomi-status-text" style="font-size: 0.84rem; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  Đang chuẩn bị tải...
+                </div>
+                <div id="hitomi-detail-status-text" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">
+                  Trang 0 / 0
+                </div>
+              </div>
+              <span id="hitomi-percent-text" style="font-size: 0.85rem; font-weight: 800; color: var(--accent-light);">0%</span>
+            </div>
+            <div class="backup-progress-bar-bg">
+              <div class="backup-progress-bar-fill" id="hitomi-progress-fill" style="width: 0%;"></div>
+            </div>
+            <button class="btn btn-secondary" id="hitomi-cancel-btn" style="margin-top: 6px; width: 100%; padding: 8px; font-size: 0.78rem;" onclick="app.cancelHitomiDownload()">
+              ✕ Huỷ quá trình tải
+            </button>
+          </div>
+
+        </div>
+
+        <div class="modal-actions-horizontal" style="margin-top: 14px;">
+          <button class="btn btn-secondary" style="flex: 1;" onclick="app.closeHitomiModal()">
             Đóng
           </button>
         </div>
