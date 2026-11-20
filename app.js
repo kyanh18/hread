@@ -1920,6 +1920,12 @@ class KhoTruyen {
 
     try {
       const res = await fetch(`${url}/api/ping`, { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error('HTTP 404 (Chưa bật URL). Trên Cloudflare hãy bấm vào tab "Domains" và chọn "Enable" cho workers.dev!');
+        }
+        throw new Error(`Máy chủ trả về HTTP ${res.status}`);
+      }
       const data = await res.json();
       if (data && data.status === 'ok') {
         this.hitomiProxyUrl = url;
@@ -1998,6 +2004,9 @@ class KhoTruyen {
     try {
       const res = await fetch(`${this.hitomiProxyUrl}/api/parse?url=${encodeURIComponent(rawUrl)}`);
       if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error('HTTP 404: Worker chưa được kích hoạt URL. Trên Cloudflare hãy bấm vào tab "Domains" và chọn "Enable" cho workers.dev!');
+        }
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || `Lỗi máy chủ HTTP ${res.status}`);
       }
