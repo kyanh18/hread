@@ -174,7 +174,7 @@ class KhoTruyen {
     this.lastViewedStoryId = null;
     this.isStoragePersisted = false;
     this.storageEstimate = { usage: 0, quota: 0, percent: 0 };
-    this.hitomiProxyUrl = localStorage.getItem('khotruyen_hitomi_proxy') || '';
+    this.hitomiProxyUrl = localStorage.getItem('khotruyen_hitomi_proxy') || 'https://hread.kyanh1801.workers.dev';
     this.hitomiScannedGalleries = [];
     this.hitomiSelectedGalleryIds = new Set();
     this.hitomiAbortController = null;
