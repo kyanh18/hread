@@ -2522,66 +2522,6 @@ class KhoTruyen {
     }
   }
 
-      if (!signal.aborted && completedGalleries > 0) {
-        // Handle Category Assignment
-        if (selectedCatId === '') {
-          // Auto create category by artist name or page title
-          const catName = detectedArtistName ? `Tác giả: ${detectedArtistName}` : (this.hitomiScannedTitle || 'Hitomi');
-          let cat = this.categories.find((c) => c.name.toLowerCase() === catName.toLowerCase());
-          if (!cat) {
-            cat = {
-              id: 'cat_' + this.generateId(),
-              name: catName,
-              storyIds: [...createdStoryIds],
-              createdAt: Date.now(),
-            };
-          } else {
-            cat.storyIds = Array.from(new Set([...(cat.storyIds || []), ...createdStoryIds]));
-            cat.updatedAt = Date.now();
-          }
-          await this.db.addCategory(cat);
-          this.selectedCategoryId = cat.id; // switch view
-        } else if (selectedCatId !== '_none_') {
-          const cat = this.categories.find((c) => c.id === selectedCatId);
-          if (cat) {
-            cat.storyIds = Array.from(new Set([...(cat.storyIds || []), ...createdStoryIds]));
-            cat.updatedAt = Date.now();
-            await this.db.addCategory(cat);
-            this.selectedCategoryId = cat.id;
-          }
-        }
-
-        if (fillEl) fillEl.style.width = '100%';
-        if (percentText) percentText.textContent = '100%';
-        if (statusText) statusText.textContent = 'Hoàn tất tải về!';
-        if (detailText) detailText.textContent = `Đã lưu an toàn ${completedGalleries} bộ truyện vào kho!`;
-
-        this.showToast(`Đã tải thành công ${completedGalleries} bộ truyện vào app ✓`, 'success');
-
-        setTimeout(async () => {
-          this.closeHitomiModal();
-          await this.loadLibrary();
-          await this.updateStorageUI();
-        }, 1200);
-      }
-    } catch (err) {
-      if (signal.aborted) {
-        console.log('Download aborted by user');
-      } else {
-        console.error('Hitomi download error:', err);
-        if (err.name === 'QuotaExceededError' || err.message?.toLowerCase().includes('quota')) {
-          alert('Bộ nhớ điện thoại / trình duyệt đã đầy (QuotaExceededError)! Hãy xoá bớt truyện hoặc sao lưu trước khi tải tiếp.');
-        } else {
-          this.showToast('Lỗi khi tải truyện: ' + err.message, 'error');
-        }
-      }
-    } finally {
-      this.hitomiAbortController = null;
-      if (startBtn) startBtn.disabled = false;
-      if (footerBtn) footerBtn.disabled = false;
-    }
-  }
-
   // ==================== TOAST ====================
   showToast(message, type = '') {
     // Remove existing toast
