@@ -1659,6 +1659,195 @@ body {
   transition: width 0.2s ease;
 }
 
+/* Google Drive Cloud Backup */
+.gdrive-card {
+  border-color: rgba(66, 133, 244, 0.25);
+  background: linear-gradient(180deg, rgba(66, 133, 244, 0.05) 0%, var(--bg-card) 100%);
+}
+
+.gdrive-status-badge {
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.gdrive-status-badge.connected {
+  background: rgba(46, 204, 113, 0.15);
+  color: var(--success);
+  border-color: rgba(46, 204, 113, 0.3);
+}
+
+.gdrive-config-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-secondary);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.gdrive-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gdrive-field-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.gdrive-input-group {
+  display: flex;
+  gap: 8px;
+}
+
+.gdrive-text-input {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+}
+
+.gdrive-text-input:focus {
+  border-color: #4285F4;
+}
+
+.gdrive-guide-toggle {
+  font-size: 0.73rem;
+  color: #4285F4;
+  cursor: pointer;
+  user-select: none;
+  margin-top: 2px;
+  display: inline-block;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gdrive-guide-content {
+  background: var(--bg-card);
+  border: 1px dashed rgba(66, 133, 244, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.gdrive-guide-content ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.gdrive-guide-content li {
+  margin-bottom: 4px;
+}
+
+.gdrive-guide-content a {
+  color: #4285F4;
+  text-decoration: underline;
+}
+
+.gdrive-guide-content code {
+  background: var(--bg-secondary);
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+
+.gdrive-options-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.gdrive-option-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gdrive-option-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gdrive-buttons-row {
+  display: flex;
+  gap: 10px;
+}
+
+.gdrive-buttons-row .btn {
+  flex: 1;
+}
+
+.gdrive-file-list {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.gdrive-file-list-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.gdrive-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-card);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.gdrive-file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.gdrive-file-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gdrive-file-meta {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
 /* Batch Modal */
 .batch-modal-body {
   overflow-y: auto;

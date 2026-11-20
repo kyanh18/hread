@@ -179,6 +179,10 @@ class KhoTruyen {
     this.hitomiSelectedGalleryIds = new Set();
     this.hitomiAbortController = null;
     this.hitomiScannedTitle = '';
+    this.gdriveClientId = localStorage.getItem('khotruyen_gdrive_client_id') || '';
+    this.gdriveFolderName = localStorage.getItem('khotruyen_gdrive_folder_name') || 'KhoTruyen';
+    this.gdriveAccessToken = null;
+    this.gdriveTokenExpiresAt = 0;
   }
 
   createManagedUrl(blobOrData) {
@@ -1384,6 +1388,7 @@ class KhoTruyen {
     if (modal) modal.style.display = 'flex';
     this.hideBackupProgress();
     await this.updateStorageUI();
+    this.initGDriveUI();
   }
 
   closeBackupModal() {
@@ -1403,28 +1408,165 @@ class KhoTruyen {
 
   hideBackupProgress() {
     const card = document.getElementById('backup-progress-card');
+    const textEl = document.getElementById('backup-status-text');
+    const fillEl = document.getElementById('backup-progress-fill');
     if (card) card.style.display = 'none';
+    if (textEl) textEl.textContent = 'Đang xử lý dữ liệu...';
+    if (fillEl) fillEl.style.width = '0%';
   }
 
-  async exportBackup() {
-    try {
-      this.showBackupProgress('Đang đọc danh sách truyện & danh mục...', 5);
+  // --- Google Drive Cloud Sync Helpers ---
+  initGDriveUI() {
+    const clientInput = document.getElementById('gdrive-client-id-input');
+    const folderInput = document.getElementById('gdrive-folder-name-input');
+    if (clientInput) clientInput.value = this.gdriveClientId || '';
+    if (folderInput) folderInput.value = this.gdriveFolderName || 'KhoTruyen';
+    this.updateGDriveBadge(Boolean(this.gdriveAccessToken && this.gdriveTokenExpiresAt > Date.now() + 60000));
+  }
 
-      const stories = await this.db.getAllStories();
-      const categories = await this.db.getAllCategories();
+  saveGDriveSettings() {
+    const clientInput = document.getElementById('gdrive-client-id-input');
+    const folderInput = document.getElementById('gdrive-folder-name-input');
+    if (clientInput) {
+      this.gdriveClientId = clientInput.value.trim();
+      localStorage.setItem('khotruyen_gdrive_client_id', this.gdriveClientId);
+    }
+    if (folderInput) {
+      this.gdriveFolderName = folderInput.value.trim() || 'KhoTruyen';
+      localStorage.setItem('khotruyen_gdrive_folder_name', this.gdriveFolderName);
+    }
+    this.updateGDriveBadge(Boolean(this.gdriveAccessToken && this.gdriveTokenExpiresAt > Date.now() + 60000));
+    this.showToast('Đã lưu cấu hình Google Drive ✓', 'success');
+  }
 
-      if (stories.length === 0 && categories.length === 0) {
-        this.showToast('Kho truyện đang trống, không có gì để sao lưu!', 'error');
-        this.hideBackupProgress();
-        return;
+  toggleGDriveGuide() {
+    const guide = document.getElementById('gdrive-guide-content');
+    if (guide) {
+      guide.style.display = guide.style.display === 'none' ? 'block' : 'none';
+    }
+  }
+
+  updateGDriveBadge(isConnected) {
+    const badge = document.getElementById('gdrive-status-badge');
+    if (!badge) return;
+    if (isConnected) {
+      badge.textContent = '✓ Đã kết nối';
+      badge.className = 'gdrive-status-badge connected';
+    } else if (this.gdriveClientId) {
+      badge.textContent = 'Sẵn sàng đăng nhập';
+      badge.className = 'gdrive-status-badge';
+    } else {
+      badge.textContent = 'Chưa cấu hình';
+      badge.className = 'gdrive-status-badge';
+    }
+  }
+
+  initGoogleAuth() {
+    return new Promise((resolve, reject) => {
+      const clientId = (this.gdriveClientId || localStorage.getItem('khotruyen_gdrive_client_id') || '').trim();
+      if (!clientId) {
+        return reject(new Error('Vui lòng nhập Google Client ID trong phần cài đặt sao lưu Google Drive!'));
       }
 
-      this.showBackupProgress('Đang tổng hợp dữ liệu ảnh...', 10);
-      
-      const allImages = [];
+      if (this.gdriveAccessToken && this.gdriveTokenExpiresAt > Date.now() + 60000) {
+        return resolve(this.gdriveAccessToken);
+      }
+
+      const proceedAuth = () => {
+        try {
+          if (!window.google?.accounts?.oauth2) {
+            return reject(new Error('Không tìm thấy thư viện Google Identity Services.'));
+          }
+          const tokenClient = window.google.accounts.oauth2.initTokenClient({
+            client_id: clientId,
+            scope: 'https://www.googleapis.com/auth/drive.file',
+            callback: (tokenResponse) => {
+              if (tokenResponse && tokenResponse.access_token) {
+                this.gdriveAccessToken = tokenResponse.access_token;
+                const expiresIn = Number(tokenResponse.expires_in) || 3600;
+                this.gdriveTokenExpiresAt = Date.now() + expiresIn * 1000;
+                this.updateGDriveBadge(true);
+                resolve(tokenResponse.access_token);
+              } else if (tokenResponse && tokenResponse.error) {
+                reject(new Error('Lỗi xác thực Google: ' + (tokenResponse.error_description || tokenResponse.error)));
+              } else {
+                reject(new Error('Đăng nhập Google bị hủy hoặc thất bại!'));
+              }
+            },
+          });
+          tokenClient.requestAccessToken({ prompt: '' });
+        } catch (e) {
+          reject(e);
+        }
+      };
+
+      if (!window.google?.accounts?.oauth2) {
+        const script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => proceedAuth();
+        script.onerror = () => reject(new Error('Không thể tải thư viện Google Identity Services. Hãy kiểm tra kết nối mạng!'));
+        document.head.appendChild(script);
+      } else {
+        proceedAuth();
+      }
+    });
+  }
+
+  async getOrCreateGDriveFolder(folderName, token) {
+    if (!folderName || folderName.trim() === '') return null;
+    const cleanName = folderName.trim();
+    try {
+      const q = `mimeType = 'application/vnd.google-apps.folder' and name = '${cleanName.replace(/'/g, "\\'")}' and trashed = false`;
+      const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        if (searchData.files && searchData.files.length > 0) {
+          return searchData.files[0].id;
+        }
+      }
+
+      // Create folder
+      const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: cleanName,
+          mimeType: 'application/vnd.google-apps.folder',
+        }),
+      });
+      if (createRes.ok) {
+        const createData = await createRes.json();
+        return createData.id;
+      }
+    } catch (e) {
+      console.warn('Folder resolution error:', e);
+    }
+    return null;
+  }
+
+  // --- Shared Backup Data Generator ---
+  async generateBackupData(contentMode = 'full', onProgress) {
+    const stories = await this.db.getAllStories();
+    const categories = await this.db.getAllCategories();
+
+    if (stories.length === 0 && categories.length === 0) {
+      this.showToast('Kho truyện đang trống, không có gì để sao lưu!', 'error');
+      this.hideBackupProgress();
+      return null;
+    }
+
+    const allImages = [];
+    if (contentMode === 'full') {
       let totalImgCount = 0;
       for (const s of stories) {
-        totalImgCount += (s.imageCount || 0);
+        totalImgCount += s.imageCount || 0;
       }
 
       let processedImgs = 0;
@@ -1435,7 +1577,7 @@ class KhoTruyen {
           if (img.data instanceof Blob) {
             dataUrl = await this.blobToDataUrl(img.data);
           } else {
-            dataUrl = img.data; // already string
+            dataUrl = img.data;
           }
 
           allImages.push({
@@ -1447,22 +1589,103 @@ class KhoTruyen {
           });
 
           processedImgs++;
-          const percent = Math.round(10 + (processedImgs / Math.max(1, totalImgCount)) * 75);
-          this.showBackupProgress(`Đang xuất ảnh: ${processedImgs} / ${totalImgCount}...`, percent);
+          if (onProgress && (processedImgs % 5 === 0 || processedImgs === totalImgCount)) {
+            const pct = Math.round((processedImgs / Math.max(1, totalImgCount)) * 100);
+            onProgress(`Đang xuất ảnh: ${processedImgs} / ${totalImgCount}...`, pct);
+          }
         }
       }
+    }
+
+    return {
+      app: 'KhoTruyen',
+      version: 2,
+      mode: contentMode,
+      exportedAt: Date.now(),
+      stories: stories,
+      categories: categories,
+      images: allImages,
+    };
+  }
+
+  // --- Shared Backup Data Applier / Restorer ---
+  async applyBackupData(data, mode = 'merge') {
+    if (!data || data.app !== 'KhoTruyen' || !Array.isArray(data.stories)) {
+      throw new Error('Dữ liệu không hợp lệ hoặc không phải bản sao lưu của Kho Truyện!');
+    }
+
+    if (mode === 'replace') {
+      if (!confirm('Chế độ "Thay thế toàn bộ" sẽ xoá toàn bộ kho truyện hiện tại trước khi nạp dữ liệu mới. Bạn có chắc chắn không?')) {
+        this.hideBackupProgress();
+        return;
+      }
+      this.showBackupProgress('Đang xoá dữ liệu cũ...', 25);
+      await this.db.clearAllData();
+    }
+
+    // Restore categories
+    this.showBackupProgress('Đang khôi phục danh mục...', 35);
+    if (Array.isArray(data.categories)) {
+      for (const cat of data.categories) {
+        await this.db.addCategory(cat);
+      }
+    }
+
+    // Restore stories
+    this.showBackupProgress('Đang khôi phục danh sách truyện...', 50);
+    for (const story of data.stories) {
+      await this.db.addStory(story);
+    }
+
+    // Restore images (stored as Blobs for maximum space optimization!)
+    const images = Array.isArray(data.images) ? data.images : [];
+    let restoredImgs = 0;
+    const totalImgs = images.length;
+
+    for (const img of images) {
+      let blobData = null;
+      if (typeof img.data === 'string' && img.data.startsWith('data:')) {
+        blobData = await this.dataUrlToBlob(img.data);
+      } else if (img.data instanceof Blob) {
+        blobData = img.data;
+      }
+
+      await this.db.addImage({
+        id: img.id || this.generateId(),
+        storyId: img.storyId,
+        name: img.name,
+        data: blobData || img.data,
+        order: img.order || 0,
+      });
+
+      restoredImgs++;
+      if (restoredImgs % 5 === 0 || restoredImgs === totalImgs) {
+        const percent = Math.round(50 + (restoredImgs / Math.max(1, totalImgs)) * 48);
+        this.showBackupProgress(`Đang nạp ảnh: ${restoredImgs} / ${totalImgs}...`, percent);
+      }
+    }
+
+    this.showBackupProgress('Khôi phục hoàn tất!', 100);
+    await this.loadLibrary();
+    await this.updateStorageUI();
+    this.showToast(`Khôi phục thành công ${data.stories.length} truyện ✓`, 'success');
+
+    setTimeout(() => {
+      this.closeBackupModal();
+    }, 1200);
+  }
+
+  // --- Export to Device (.json) ---
+  async exportBackup() {
+    try {
+      this.showBackupProgress('Đang đọc danh sách truyện & danh mục...', 5);
+      const backupData = await this.generateBackupData('full', (msg, pct) => {
+        this.showBackupProgress(msg, Math.round(10 + pct * 0.75));
+      });
+
+      if (!backupData) return;
 
       this.showBackupProgress('Đang tạo file sao lưu...', 90);
-
-      const backupData = {
-        app: 'KhoTruyen',
-        version: 2,
-        exportedAt: Date.now(),
-        stories: stories,
-        categories: categories,
-        images: allImages,
-      };
-
       const jsonStr = JSON.stringify(backupData);
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -1493,16 +1716,16 @@ class KhoTruyen {
     }
   }
 
+  // --- Import from Device (.json) ---
   async importBackup(file) {
     if (!file) return;
-
     const mode = document.querySelector('input[name="restore-mode"]:checked')?.value || 'merge';
 
     try {
       this.showBackupProgress('Đang đọc file sao lưu...', 10);
       const text = await file.text();
-      
-      this.showBackupProgress('Đang giải mã dữ liệu...', 25);
+
+      this.showBackupProgress('Đang giải mã dữ liệu...', 20);
       let data;
       try {
         data = JSON.parse(text);
@@ -1510,72 +1733,280 @@ class KhoTruyen {
         throw new Error('File JSON bị lỗi định dạng!');
       }
 
-      if (!data || data.app !== 'KhoTruyen' || !Array.isArray(data.stories)) {
-        throw new Error('File không hợp lệ hoặc không phải bản sao lưu của Kho Truyện!');
-      }
-
-      if (mode === 'replace') {
-        if (!confirm('Chế độ "Thay thế toàn bộ" sẽ xoá toàn bộ kho truyện hiện tại trước khi nạp dữ liệu mới. Bạn có chắc chắn không?')) {
-          this.hideBackupProgress();
-          return;
-        }
-        this.showBackupProgress('Đang xoá dữ liệu cũ...', 35);
-        await this.db.clearAllData();
-      }
-
-      // Restore categories
-      this.showBackupProgress('Đang khôi phục danh mục...', 40);
-      if (Array.isArray(data.categories)) {
-        for (const cat of data.categories) {
-          await this.db.addCategory(cat);
-        }
-      }
-
-      // Restore stories
-      this.showBackupProgress('Đang khôi phục danh sách truyện...', 50);
-      for (const story of data.stories) {
-        await this.db.addStory(story);
-      }
-
-      // Restore images (stored as Blobs for maximum space optimization!)
-      const images = Array.isArray(data.images) ? data.images : [];
-      let restoredImgs = 0;
-      const totalImgs = images.length;
-
-      for (const img of images) {
-        let blobData = null;
-        if (typeof img.data === 'string' && img.data.startsWith('data:')) {
-          blobData = await this.dataUrlToBlob(img.data);
-        } else if (img.data instanceof Blob) {
-          blobData = img.data;
-        }
-
-        await this.db.addImage({
-          id: img.id || this.generateId(),
-          storyId: img.storyId,
-          name: img.name,
-          data: blobData || img.data,
-          order: img.order || 0,
-        });
-
-        restoredImgs++;
-        if (restoredImgs % 5 === 0 || restoredImgs === totalImgs) {
-          const percent = Math.round(50 + (restoredImgs / Math.max(1, totalImgs)) * 48);
-          this.showBackupProgress(`Đang nạp ảnh: ${restoredImgs} / ${totalImgs}...`, percent);
-        }
-      }
-
-      this.showBackupProgress('Khôi phục hoàn tất!', 100);
-      await this.loadLibrary();
-      await this.updateStorageUI();
-      this.showToast(`Khôi phục thành công ${data.stories.length} truyện ✓`, 'success');
-
-      setTimeout(() => {
-        this.closeBackupModal();
-      }, 1200);
+      await this.applyBackupData(data, mode);
     } catch (err) {
       console.error('Restore error:', err);
       this.showToast('Lỗi khôi phục: ' + err.message, 'error');
+      this.hideBackupProgress();
+    }
+  }
+
+  // --- Upload directly to Google Drive ---
+  async uploadToGoogleDrive() {
+    try {
+      const clientId = (this.gdriveClientId || localStorage.getItem('khotruyen_gdrive_client_id') || '').trim();
+      if (!clientId) {
+        this.showToast('Vui lòng nhập Google Client ID trước!', 'info');
+        const input = document.getElementById('gdrive-client-id-input');
+        if (input) input.focus();
+        return;
+      }
+
+      const filenameMode = document.querySelector('input[name="gdrive-filename-mode"]:checked')?.value || 'overwrite';
+      const contentMode = document.querySelector('input[name="gdrive-content-mode"]:checked')?.value || 'full';
+      const folderName = (this.gdriveFolderName || 'KhoTruyen').trim();
+
+      this.showBackupProgress('Đang kết nối Google Drive...', 5);
+      const token = await this.initGoogleAuth();
+
+      this.showBackupProgress('Đang chuẩn bị thư mục trên Drive...', 10);
+      const folderId = await this.getOrCreateGDriveFolder(folderName, token);
+
+      this.showBackupProgress('Đang trích xuất dữ liệu kho truyện...', 15);
+      const backupData = await this.generateBackupData(contentMode, (msg, pct) => {
+        this.showBackupProgress(msg, Math.round(15 + pct * 0.35)); // 15% -> 50%
+      });
+
+      if (!backupData) return;
+
+      this.showBackupProgress('Đang nén dữ liệu sao lưu...', 52);
+      const jsonStr = JSON.stringify(backupData);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const totalBytes = blob.size;
+      const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+
+      // Determine filename
+      let filename = 'KhoTruyen_Backup.json';
+      if (contentMode === 'lite') {
+        filename = 'KhoTruyen_Backup_Lite.json';
+      }
+      if (filenameMode === 'timestamp') {
+        const now = new Date();
+        const d = now.toISOString().slice(0, 10).replace(/-/g, '');
+        const t = now.toTimeString().slice(0, 5).replace(/:/g, '');
+        filename = `KhoTruyen_Backup_${d}_${t}.json`;
+      }
+
+      this.showBackupProgress(`Đang chuẩn bị tải lên (${totalMB} MB)...`, 55);
+
+      // Check if file already exists in folder for overwrite mode
+      let existingFileId = null;
+      if (filenameMode === 'overwrite') {
+        try {
+          let q = `name = '${filename.replace(/'/g, "\\'")}' and trashed = false`;
+          if (folderId) {
+            q = `'${folderId}' in parents and ${q}`;
+          }
+          const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (searchRes.ok) {
+            const searchData = await searchRes.json();
+            if (searchData.files && searchData.files.length > 0) {
+              existingFileId = searchData.files[0].id;
+            }
+          }
+        } catch (e) {
+          console.warn('Check existing file error:', e);
+        }
+      }
+
+      // Initiate Resumable Upload Session
+      let sessionUrl = '';
+      if (existingFileId) {
+        // PATCH existing file (keeps version history in Google Drive)
+        const initRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json; charset=UTF-8',
+            'X-Upload-Content-Type': 'application/json',
+            'X-Upload-Content-Length': String(totalBytes),
+          },
+          body: JSON.stringify({ name: filename }),
+        });
+        if (!initRes.ok) throw new Error(`Khởi tạo ghi đè thất bại: HTTP ${initRes.status}`);
+        sessionUrl = initRes.headers.get('Location');
+      } else {
+        // POST new file
+        const metadata = {
+          name: filename,
+          mimeType: 'application/json',
+        };
+        if (folderId) {
+          metadata.parents = [folderId];
+        }
+        const initRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json; charset=UTF-8',
+            'X-Upload-Content-Type': 'application/json',
+            'X-Upload-Content-Length': String(totalBytes),
+          },
+          body: JSON.stringify(metadata),
+        });
+        if (!initRes.ok) throw new Error(`Khởi tạo tải lên thất bại: HTTP ${initRes.status}`);
+        sessionUrl = initRes.headers.get('Location');
+      }
+
+      if (!sessionUrl) {
+        throw new Error('Google Drive không trả về URL phiên tải lên!');
+      }
+
+      // Upload in 1MB chunks
+      const chunkSize = 1024 * 1024; // 1 MB
+      let offset = 0;
+
+      while (offset < totalBytes) {
+        const nextEnd = Math.min(offset + chunkSize, totalBytes);
+        const chunk = blob.slice(offset, nextEnd);
+
+        const chunkRes = await fetch(sessionUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Range': `bytes ${offset}-${nextEnd - 1}/${totalBytes}`,
+          },
+          body: chunk,
+        });
+
+        if (chunkRes.status === 308) {
+          offset = nextEnd;
+          const uploadedMB = (offset / (1024 * 1024)).toFixed(1);
+          const uploadPct = Math.round(55 + (offset / totalBytes) * 43); // 55% -> 98%
+          this.showBackupProgress(`Đang đẩy lên Drive: ${uploadedMB}/${totalMB} MB (${Math.round((offset / totalBytes) * 100)}%)...`, uploadPct);
+        } else if (chunkRes.status === 200 || chunkRes.status === 201) {
+          offset = totalBytes;
+          break;
+        } else {
+          throw new Error(`Lỗi tải lên từng phần: HTTP ${chunkRes.status}`);
+        }
+      }
+
+      this.showBackupProgress('Đã sao lưu lên Google Drive thành công!', 100);
+      const modeText = existingFileId ? 'Đã ghi đè cập nhật' : 'Đã tải lên';
+      this.showToast(`${modeText} "${filename}" (${totalMB} MB) vào thư mục "${folderName}" trên Google Drive ✓`, 'success');
+      setTimeout(() => this.hideBackupProgress(), 1500);
+    } catch (err) {
+      console.error('GDrive upload error:', err);
+      this.showToast('Lỗi tải lên Google Drive: ' + err.message, 'error');
+      this.hideBackupProgress();
+    }
+  }
+
+  // --- Open Google Drive Restore File List ---
+  async openGDriveRestoreList() {
+    try {
+      const clientId = (this.gdriveClientId || localStorage.getItem('khotruyen_gdrive_client_id') || '').trim();
+      if (!clientId) {
+        this.showToast('Vui lòng nhập Google Client ID trước!', 'info');
+        const input = document.getElementById('gdrive-client-id-input');
+        if (input) input.focus();
+        return;
+      }
+
+      this.showBackupProgress('Đang kết nối Google Drive...', 15);
+      const token = await this.initGoogleAuth();
+
+      this.showBackupProgress('Đang quét file sao lưu trên Drive...', 35);
+      const folderName = (this.gdriveFolderName || 'KhoTruyen').trim();
+      const folderId = await this.getOrCreateGDriveFolder(folderName, token);
+
+      let q = "name contains 'KhoTruyen_Backup' and trashed = false";
+      if (folderId) {
+        q = `'${folderId}' in parents and ${q}`;
+      }
+
+      let res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,size,modifiedTime)&orderBy=modifiedTime+desc`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        throw new Error(`Máy chủ Google trả về HTTP ${res.status}`);
+      }
+
+      let data = await res.json();
+
+      // If no files found inside specific folder, try searching anywhere in Drive
+      if ((!data.files || data.files.length === 0) && folderId) {
+        const fallbackQ = "name contains 'KhoTruyen_Backup' and trashed = false";
+        const fallbackRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(fallbackQ)}&fields=files(id,name,size,modifiedTime)&orderBy=modifiedTime+desc`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (fallbackRes.ok) {
+          data = await fallbackRes.json();
+        }
+      }
+
+      this.hideBackupProgress();
+
+      const listContainer = document.getElementById('gdrive-file-list');
+      const itemsContainer = document.getElementById('gdrive-file-items-container');
+
+      if (!data.files || data.files.length === 0) {
+        this.showToast('Không tìm thấy bản sao lưu KhoTruyen nào trên Google Drive!', 'info');
+        if (listContainer) listContainer.style.display = 'none';
+        return;
+      }
+
+      if (itemsContainer) {
+        itemsContainer.innerHTML = data.files.map((f) => {
+          const sizeMB = f.size ? (Number(f.size) / (1024 * 1024)).toFixed(1) + ' MB' : 'N/A';
+          const dateStr = f.modifiedTime ? new Date(f.modifiedTime).toLocaleString('vi-VN') : 'Không rõ';
+          return `
+            <div class="gdrive-file-item">
+              <div class="gdrive-file-info">
+                <div class="gdrive-file-name">📄 ${this.escapeHtml(f.name)}</div>
+                <div class="gdrive-file-meta">Dung lượng: ${sizeMB} • Cập nhật: ${dateStr}</div>
+              </div>
+              <button class="btn btn-sm btn-primary" onclick="app.downloadAndRestoreGDrive('${f.id}', '${this.escapeHtml(f.name).replace(/'/g, "\\'")}')">
+                Nạp bản này
+              </button>
+            </div>
+          `;
+        }).join('');
+      }
+
+      if (listContainer) {
+        listContainer.style.display = 'block';
+        listContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    } catch (err) {
+      console.error('GDrive restore list error:', err);
+      this.showToast('Lỗi tìm bản sao lưu: ' + err.message, 'error');
+      this.hideBackupProgress();
+    }
+  }
+
+  // --- Download and restore selected backup from Google Drive ---
+  async downloadAndRestoreGDrive(fileId, fileName) {
+    const restoreMode = document.querySelector('input[name="restore-mode"]:checked')?.value || 'merge';
+    const modeDesc = restoreMode === 'replace' ? 'THAY THẾ TOÀN BỘ kho truyện' : 'GỘP VÀO kho truyện hiện tại';
+
+    if (!confirm(`Bạn có chắc muốn nạp bản sao lưu "${fileName}" từ Google Drive?\nChế độ: ${modeDesc}`)) {
+      return;
+    }
+
+    try {
+      this.showBackupProgress('Đang kết nối Google Drive...', 10);
+      const token = await this.initGoogleAuth();
+
+      this.showBackupProgress(`Đang tải "${fileName}" từ Google Drive...`, 25);
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        throw new Error(`Không thể tải file: HTTP ${res.status}`);
+      }
+
+      this.showBackupProgress('Đang phân tích dữ liệu sao lưu...', 40);
+      const backupData = await res.json();
+
+      await this.applyBackupData(backupData, restoreMode);
+    } catch (err) {
+      console.error('GDrive restore error:', err);
+      this.showToast('Lỗi khôi phục từ Drive: ' + err.message, 'error');
       this.hideBackupProgress();
     }
   }

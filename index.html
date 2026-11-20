@@ -371,6 +371,112 @@
             </button>
           </div>
 
+          <!-- Section: Google Drive Cloud Sync -->
+          <div class="backup-card gdrive-card" id="gdrive-sync-card">
+            <div class="backup-card-header">
+              <div class="backup-card-icon" style="background: rgba(66, 133, 244, 0.15); color: #4285F4;">
+                <svg width="22" height="22" viewBox="0 0 87.3 78" fill="none">
+                  <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066DA"/>
+                  <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44C.4 49.9 0 51.45 0 53h27.5L43.65 25z" fill="#00AC47"/>
+                  <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.85 10.1 7.9 13.7z" fill="#EA4335"/>
+                  <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.95 0H34.35c-1.55 0-3.1.4-4.45 1.2L43.65 25z" fill="#00832D"/>
+                  <path d="M59.8 53H27.5L13.75 76.8c1.35.8 2.9 1.2 4.45 1.2h50.9c1.55 0 3.1-.4 4.45-1.2L59.8 53z" fill="#2684FC"/>
+                  <path d="M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25 59.8 53h27.5c0-1.55-.4-3.1-1.2-4.5l-12.7-22z" fill="#FFBA00"/>
+                </svg>
+              </div>
+              <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                  <div class="backup-card-title">Sao lưu Google Drive (Đám mây)</div>
+                  <span class="gdrive-status-badge" id="gdrive-status-badge">Chưa kết nối</span>
+                </div>
+                <div class="backup-card-desc">Tự động đẩy bản sao lưu lên thư mục Google Drive của bạn mà không cần tải file về máy.</div>
+              </div>
+            </div>
+
+            <!-- GDrive Options & Config -->
+            <div class="gdrive-config-box" id="gdrive-config-box">
+              <div class="gdrive-field-row">
+                <label class="gdrive-field-label">Google Client ID (OAuth 2.0):</label>
+                <div class="gdrive-input-group">
+                  <input type="text" id="gdrive-client-id-input" class="gdrive-text-input" placeholder="Dán mã Client ID từ Google Cloud..." onchange="app.saveGDriveSettings()">
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="app.saveGDriveSettings()">Lưu</button>
+                </div>
+                <div class="gdrive-guide-toggle" onclick="app.toggleGDriveGuide()">
+                  <span>❓ Hướng dẫn lấy Client ID miễn phí trong 2 phút</span>
+                </div>
+                <div class="gdrive-guide-content" id="gdrive-guide-content" style="display: none;">
+                  <ol>
+                    <li>Mở <a href="https://console.cloud.google.com" target="_blank" rel="noopener">Google Cloud Console</a> &gt; Tạo 1 Project mới.</li>
+                    <li>Vào mục <b>APIs &amp; Services</b> &gt; Bấm <b>Enable APIs</b> &gt; Tìm và Bật <b>Google Drive API</b>.</li>
+                    <li>Vào <b>OAuth consent screen</b> &gt; Chọn External &gt; Điền tên App (VD: KhoTruyen) và email của bạn rồi bấm Save.</li>
+                    <li>Vào <b>Credentials</b> &gt; <b>Create Credentials</b> &gt; <b>OAuth client ID</b> (Application type: <i>Web application</i>).</li>
+                    <li>Tại mục <b>Authorized JavaScript origins</b>, thêm: <code>https://kyanh18.github.io</code> (và <code>http://localhost:8080</code> nếu thử nghiệm trên máy).</li>
+                    <li>Bấm Create, copy mã <b>Client ID</b> và dán vào ô trên!</li>
+                  </ol>
+                </div>
+              </div>
+
+              <div class="gdrive-field-row" style="margin-top: 4px;">
+                <label class="gdrive-field-label">Thư mục lưu trên Google Drive:</label>
+                <input type="text" id="gdrive-folder-name-input" class="gdrive-text-input" placeholder="KhoTruyen" value="KhoTruyen" onchange="app.saveGDriveSettings()">
+              </div>
+
+              <!-- Options -->
+              <div class="gdrive-options-grid">
+                <div class="gdrive-option-item">
+                  <span class="gdrive-option-title">Cách đặt tên file:</span>
+                  <label class="restore-radio-label" style="margin-top: 4px;">
+                    <input type="radio" name="gdrive-filename-mode" value="overwrite" checked>
+                    <span>Ghi đè thông minh (<code>KhoTruyen_Backup.json</code>, Drive tự lưu lịch sử bản cũ)</span>
+                  </label>
+                  <label class="restore-radio-label">
+                    <input type="radio" name="gdrive-filename-mode" value="timestamp">
+                    <span>Thêm ngày giờ (Tạo file riêng biệt cho mỗi lần sao lưu)</span>
+                  </label>
+                </div>
+
+                <div class="gdrive-option-item">
+                  <span class="gdrive-option-title">Dung lượng sao lưu:</span>
+                  <label class="restore-radio-label" style="margin-top: 4px;">
+                    <input type="radio" name="gdrive-content-mode" value="full" checked>
+                    <span>Đầy đủ (Gồm toàn bộ truyện &amp; ảnh offline)</span>
+                  </label>
+                  <label class="restore-radio-label">
+                    <input type="radio" name="gdrive-content-mode" value="lite">
+                    <span>Tinh gọn (Chỉ danh mục &amp; thông tin truyện, siêu nhẹ &lt; 1MB)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- GDrive Action Buttons -->
+            <div class="gdrive-buttons-row">
+              <button class="btn btn-primary backup-action-btn" id="gdrive-upload-btn" onclick="app.uploadToGoogleDrive()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+                  <polyline points="12 11 12 16 12 11"/>
+                  <polyline points="9 13 12 10 15 13"/>
+                </svg>
+                <span>Đẩy lên Google Drive</span>
+              </button>
+
+              <button class="btn btn-secondary backup-action-btn" id="gdrive-restore-btn" onclick="app.openGDriveRestoreList()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+                  <polyline points="12 15 12 10 12 15"/>
+                  <polyline points="9 13 12 16 15 13"/>
+                </svg>
+                <span>Khôi phục từ Drive</span>
+              </button>
+            </div>
+
+            <!-- Restore File List Picker (Dynamically populated) -->
+            <div class="gdrive-file-list" id="gdrive-file-list" style="display: none;">
+              <div class="gdrive-file-list-title">Chọn bản sao lưu trên Google Drive:</div>
+              <div id="gdrive-file-items-container"></div>
+            </div>
+          </div>
+
           <!-- Section 1: Export -->
           <div class="backup-card">
             <div class="backup-card-header">
@@ -680,6 +786,7 @@
       }).catch(() => {});
     }
   </script>
-  <script src="./app.js?v=11"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="./app.js?v=12"></script>
 </body>
 </html>
