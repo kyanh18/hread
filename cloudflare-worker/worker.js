@@ -1,6 +1,7 @@
 /**
  * Cloudflare Worker Proxy for Hitomi.la
- * Handles CORS, Referer headers, gg.js URL resolution, nozomi binary indexes, and image streaming
+ * Supports modern gold-usergeneratedcontent.net CDN, Nozomi binary index decoding,
+ * gg.js dynamic resolution, and image streaming with proper Referer.
  */
 
 const CORS_HEADERS = {
@@ -9,6 +10,9 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
 };
+
+const LTN_DOMAIN = 'ltn.gold-usergeneratedcontent.net';
+const IMAGE_DOMAIN = 'gold-usergeneratedcontent.net';
 
 export default {
   async fetch(request, env, ctx) {
@@ -36,6 +40,7 @@ export default {
         endpoints: ['/api/parse?url=...', '/api/gallery?id=...', '/api/image?url=...&id=...']
       });
     } catch (err) {
+      console.error('Worker request error:', err);
       return jsonResponse({ error: err.message || 'Internal Server Error' }, 500);
     }
   }
@@ -60,7 +65,7 @@ async function handleParse(url) {
     return jsonResponse({ error: 'Missing "url" query parameter' }, 400);
   }
 
-  // 1. Check if it's a direct ID or single gallery URL
+  // 1. Check if it's a direct ID or single gallery URL (e.g. 1234567, reader/1234567.html, doujinshi/...-1234567.html)
   const singleIdMatch = targetUrl.match(/^(\d{5,9})$/) ||
     targetUrl.match(/\/reader\/(\d+)\.html/) ||
     targetUrl.match(/-(?!english|all|japanese|korean|chinese|spanish|thai|vietnamese)(\d+)\.html/);
@@ -87,7 +92,7 @@ async function handleParse(url) {
     const { nozomiUrls, title, subtitle } = nozomiInfo;
     let galleryIds = [];
 
-    // Try nozomi URLs in sequence until one succeeds
+    // Try nozomi URLs in sequence
     for (const nUrl of nozomiUrls) {
       try {
         const res = await fetch(nUrl, {
@@ -115,7 +120,7 @@ async function handleParse(url) {
         type: 'collection',
         sourceUrl: targetUrl,
         pageTitle: title,
-        subtitle: `${subtitle} (${galleryIds.length} bộ tìm thấy, hiển thị 30 bộ đầu)`,
+        subtitle: `${subtitle} (Tìm thấy ${galleryIds.length} bộ, hiển thị ${galleries.length} bộ)`,
         totalFound: galleryIds.length,
         count: galleries.length,
         galleries,
@@ -123,7 +128,7 @@ async function handleParse(url) {
     }
   }
 
-  // 3. Fallback: Fetch as raw HTML and parse links (legacy fallback)
+  // 3. Fallback: Fetch as raw HTML and parse links
   let fetchUrl = targetUrl;
   if (!fetchUrl.startsWith('http')) {
     fetchUrl = 'https://hitomi.la/' + fetchUrl.replace(/^\/+/, '');
@@ -201,8 +206,8 @@ function resolveNozomiQuery(inputUrl) {
       title: `Tác giả: ${artist}`,
       subtitle: `Ngôn ngữ: ${lang}`,
       nozomiUrls: [
-        `https://ltn.hitomi.la/artist/${artist}-${lang}.nozomi`,
-        `https://ltn.hitomi.la/artist/${artist}-all.nozomi`
+        `https://${LTN_DOMAIN}/artist/${artist}-${lang}.nozomi`,
+        `https://${LTN_DOMAIN}/artist/${artist}-all.nozomi`
       ]
     };
   }
@@ -216,8 +221,8 @@ function resolveNozomiQuery(inputUrl) {
       title: `Nhóm: ${group}`,
       subtitle: `Ngôn ngữ: ${lang}`,
       nozomiUrls: [
-        `https://ltn.hitomi.la/group/${group}-${lang}.nozomi`,
-        `https://ltn.hitomi.la/group/${group}-all.nozomi`
+        `https://${LTN_DOMAIN}/group/${group}-${lang}.nozomi`,
+        `https://${LTN_DOMAIN}/group/${group}-all.nozomi`
       ]
     };
   }
@@ -231,14 +236,13 @@ function resolveNozomiQuery(inputUrl) {
       title: `Thẻ: ${tag}`,
       subtitle: `Ngôn ngữ: ${lang}`,
       nozomiUrls: [
-        `https://ltn.hitomi.la/tag/${tag}-${lang}.nozomi`,
-        `https://ltn.hitomi.la/tag/${tag}-all.nozomi`
+        `https://${LTN_DOMAIN}/tag/${tag}-${lang}.nozomi`,
+        `https://${LTN_DOMAIN}/tag/${tag}-all.nozomi`
       ]
     };
   }
 
   // Search query in URL e.g. search.html?artist%3Ajimpu6%20language%3Aenglish
-  // or raw text like: artist:jimpu6 language:english
   let queryString = decoded;
   if (queryString.includes('search.html?')) {
     queryString = queryString.split('search.html?')[1];
@@ -256,8 +260,8 @@ function resolveNozomiQuery(inputUrl) {
       title: `Tác giả: ${artist}`,
       subtitle: `Ngôn ngữ: ${lang}`,
       nozomiUrls: [
-        `https://ltn.hitomi.la/artist/${artist}-${lang}.nozomi`,
-        `https://ltn.hitomi.la/artist/${artist}-all.nozomi`
+        `https://${LTN_DOMAIN}/artist/${artist}-${lang}.nozomi`,
+        `https://${LTN_DOMAIN}/artist/${artist}-all.nozomi`
       ]
     };
   }
@@ -270,8 +274,8 @@ function resolveNozomiQuery(inputUrl) {
       title: `Nhóm: ${grp}`,
       subtitle: `Ngôn ngữ: ${lang}`,
       nozomiUrls: [
-        `https://ltn.hitomi.la/group/${grp}-${lang}.nozomi`,
-        `https://ltn.hitomi.la/group/${grp}-all.nozomi`
+        `https://${LTN_DOMAIN}/group/${grp}-${lang}.nozomi`,
+        `https://${LTN_DOMAIN}/group/${grp}-all.nozomi`
       ]
     };
   }
@@ -284,21 +288,21 @@ function resolveNozomiQuery(inputUrl) {
       title: `Thẻ: ${tag}`,
       subtitle: `Ngôn ngữ: ${lang}`,
       nozomiUrls: [
-        `https://ltn.hitomi.la/tag/${tag}-${lang}.nozomi`,
-        `https://ltn.hitomi.la/tag/${tag}-all.nozomi`
+        `https://${LTN_DOMAIN}/tag/${tag}-${lang}.nozomi`,
+        `https://${LTN_DOMAIN}/tag/${tag}-all.nozomi`
       ]
     };
   }
 
-  // If user just typed a bare artist name (e.g. "jimpu6")
+  // Bare artist name input (e.g. "jimpu6")
   if (!queryString.includes('/') && !queryString.includes('?') && queryString.length >= 2) {
     const artist = queryString.toLowerCase().replace(/\s+/g, '_');
     return {
       title: `Tác giả: ${artist}`,
       subtitle: `Ngôn ngữ: english`,
       nozomiUrls: [
-        `https://ltn.hitomi.la/artist/${artist}-english.nozomi`,
-        `https://ltn.hitomi.la/artist/${artist}-all.nozomi`
+        `https://${LTN_DOMAIN}/artist/${artist}-english.nozomi`,
+        `https://${LTN_DOMAIN}/artist/${artist}-all.nozomi`
       ]
     };
   }
@@ -413,7 +417,7 @@ async function handleImage(url) {
     return new Response('Missing "url" parameter', { status: 400, headers: CORS_HEADERS });
   }
 
-  if (!targetUrl.includes('hitomi.la')) {
+  if (!targetUrl.includes(IMAGE_DOMAIN) && !targetUrl.includes('hitomi.la')) {
     return new Response('Invalid target domain', { status: 403, headers: CORS_HEADERS });
   }
 
@@ -428,7 +432,7 @@ async function handleImage(url) {
     return new Response(`Hitomi CDN error: ${imgRes.status}`, { status: imgRes.status, headers: CORS_HEADERS });
   }
 
-  const contentType = imgRes.headers.get('content-type') || 'image/webp';
+  const contentType = imgRes.headers.get('content-type') || 'image/avif';
   return new Response(imgRes.body, {
     status: 200,
     headers: {
@@ -442,7 +446,7 @@ async function handleImage(url) {
 // ==================== HELPERS ====================
 
 async function fetchGalleryInfo(galleryId) {
-  const res = await fetch(`https://ltn.hitomi.la/galleries/${galleryId}.js`, {
+  const res = await fetch(`https://${LTN_DOMAIN}/galleries/${galleryId}.js`, {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Referer': 'https://hitomi.la/',
@@ -459,7 +463,7 @@ async function fetchGalleryInfo(galleryId) {
 }
 
 async function fetchGg() {
-  const res = await fetch('https://ltn.hitomi.la/gg.js', {
+  const res = await fetch(`https://${LTN_DOMAIN}/gg.js`, {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Referer': 'https://hitomi.la/',
@@ -481,28 +485,31 @@ async function fetchGg() {
 }
 
 /**
- * Resolves exact Hitomi image CDN URL using gg logic
+ * Resolves exact Hitomi image CDN URL using gg logic and modern gold-usergeneratedcontent.net CDN
  */
 function resolveHitomiUrl(file, gg) {
   const hash = file.hash;
-  const ext = file.haswebp ? 'webp' : (file.hasavif ? 'avif' : file.name.split('.').pop());
+  const ext = file.hasavif ? 'avif' : (file.haswebp ? 'webp' : file.name.split('.').pop());
 
   // gg.s(h)
   const m = /(..)(.)$/.exec(hash);
   const s = parseInt(m[2] + m[1], 16).toString(10);
 
   // Subdomain calculation: gg.m(g)
-  let subLetter = 'a';
+  let subPrefix = 'a1';
   const subMatch = /\/[0-9a-f]{61}([0-9a-f]{2})([0-9a-f])/.exec(`/${hash}`);
   if (subMatch) {
     const g = parseInt(subMatch[2] + subMatch[1], 16);
-    if (!isNaN(g) && typeof gg.m === 'function') {
-      subLetter = String.fromCharCode(97 + gg.m(g));
+    const mVal = (typeof gg.m === 'function') ? gg.m(g) : 0;
+    if (ext === 'webp') {
+      subPrefix = 'w' + (1 + mVal);
+    } else if (ext === 'avif') {
+      subPrefix = 'a' + (1 + mVal);
+    } else {
+      subPrefix = String.fromCharCode(97 + mVal);
     }
   }
 
   const b = gg.b || '';
-  const dir = (ext === 'webp' || ext === 'avif') ? 'webp/' : '';
-
-  return `https://${subLetter}a.hitomi.la/${dir}${b}${s}/${hash}.${ext}`;
+  return `https://${subPrefix}.${IMAGE_DOMAIN}/${b}${s}/${hash}.${ext}`;
 }
