@@ -673,6 +673,13 @@
 
   </div>
 
-  <script src="./app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').then((reg) => {
+        reg.update();
+      }).catch(() => {});
+    }
+  </script>
+  <script src="./app.js?v=11"></script>
 </body>
 </html>
