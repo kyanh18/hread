@@ -192,118 +192,184 @@ async function handleParse(url) {
 }
 
 /**
+ * Helper to generate all possible Nozomi index URL variants for a given tag/artist/group
+ * Hitomi CDN stores multi-word names with spaces (%20) in nozomi filenames,
+ * but users and query links often format them with underscores (_) or pluses (+).
+ */
+function getNozomiVariants(type, rawName, lang = 'all') {
+  const decoded = decodeURIComponent(rawName).trim().toLowerCase();
+  const withSpaces = encodeURIComponent(decoded.replace(/[_\+]+/g, ' ').replace(/\s+/g, ' ').trim());
+  const withUnderscores = encodeURIComponent(decoded.replace(/[\s\+]+/g, '_').trim());
+  const exact = encodeURIComponent(decoded);
+
+  const urls = [];
+  const add = (n, l) => {
+    const u = `https://${LTN_DOMAIN}/${type}/${n}-${l}.nozomi`;
+    if (!urls.includes(u)) urls.push(u);
+  };
+
+  const targetLang = (lang || 'all').toLowerCase();
+  if (targetLang !== 'all') {
+    add(withSpaces, targetLang);
+    add(withUnderscores, targetLang);
+    add(exact, targetLang);
+  }
+  add(withSpaces, 'all');
+  add(withUnderscores, 'all');
+  add(exact, 'all');
+
+  return urls;
+}
+
+/**
  * Resolves Hitomi URL or query into corresponding .nozomi binary index URLs
  */
 function resolveNozomiQuery(inputUrl) {
   let decoded = decodeURIComponent(inputUrl).trim();
 
-  // Normalize: artist page URL like https://hitomi.la/artist/jimpu6-english.html
+  // Normalize: artist page URL like https://hitomi.la/artist/dokuneko%20noil-english.html
   const artistUrlMatch = decoded.match(/\/artist\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
   if (artistUrlMatch) {
-    const artist = artistUrlMatch[1].toLowerCase().replace(/\s+/g, '_');
+    const artist = artistUrlMatch[1];
     const lang = (artistUrlMatch[2] || 'all').toLowerCase();
+    const displayName = artist.replace(/[_\+]+/g, ' ');
     return {
-      title: `Tác giả: ${artist}`,
+      title: `Tác giả: ${displayName}`,
       subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: [
-        `https://${LTN_DOMAIN}/artist/${artist}-${lang}.nozomi`,
-        `https://${LTN_DOMAIN}/artist/${artist}-all.nozomi`
-      ]
+      nozomiUrls: getNozomiVariants('artist', artist, lang)
     };
   }
 
   // Group page URL like https://hitomi.la/group/name-english.html
   const groupUrlMatch = decoded.match(/\/group\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
   if (groupUrlMatch) {
-    const group = groupUrlMatch[1].toLowerCase().replace(/\s+/g, '_');
+    const group = groupUrlMatch[1];
     const lang = (groupUrlMatch[2] || 'all').toLowerCase();
+    const displayName = group.replace(/[_\+]+/g, ' ');
     return {
-      title: `Nhóm: ${group}`,
+      title: `Nhóm: ${displayName}`,
       subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: [
-        `https://${LTN_DOMAIN}/group/${group}-${lang}.nozomi`,
-        `https://${LTN_DOMAIN}/group/${group}-all.nozomi`
-      ]
+      nozomiUrls: getNozomiVariants('group', group, lang)
+    };
+  }
+
+  // Character page URL like https://hitomi.la/character/name-english.html
+  const charUrlMatch = decoded.match(/\/character\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
+  if (charUrlMatch) {
+    const charName = charUrlMatch[1];
+    const lang = (charUrlMatch[2] || 'all').toLowerCase();
+    const displayName = charName.replace(/[_\+]+/g, ' ');
+    return {
+      title: `Nhân vật: ${displayName}`,
+      subtitle: `Ngôn ngữ: ${lang}`,
+      nozomiUrls: getNozomiVariants('character', charName, lang)
+    };
+  }
+
+  // Series page URL like https://hitomi.la/series/name-english.html
+  const seriesUrlMatch = decoded.match(/\/series\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
+  if (seriesUrlMatch) {
+    const seriesName = seriesUrlMatch[1];
+    const lang = (seriesUrlMatch[2] || 'all').toLowerCase();
+    const displayName = seriesName.replace(/[_\+]+/g, ' ');
+    return {
+      title: `Bộ truyện: ${displayName}`,
+      subtitle: `Ngôn ngữ: ${lang}`,
+      nozomiUrls: getNozomiVariants('series', seriesName, lang)
     };
   }
 
   // Tag page URL like https://hitomi.la/tag/female:name-english.html
   const tagUrlMatch = decoded.match(/\/tag\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
   if (tagUrlMatch) {
-    const tag = tagUrlMatch[1].toLowerCase().replace(/\s+/g, '_');
+    const tag = tagUrlMatch[1];
     const lang = (tagUrlMatch[2] || 'all').toLowerCase();
+    const displayName = tag.replace(/[_\+]+/g, ' ');
     return {
-      title: `Thẻ: ${tag}`,
+      title: `Thẻ: ${displayName}`,
       subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: [
-        `https://${LTN_DOMAIN}/tag/${tag}-${lang}.nozomi`,
-        `https://${LTN_DOMAIN}/tag/${tag}-all.nozomi`
-      ]
+      nozomiUrls: getNozomiVariants('tag', tag, lang)
     };
   }
 
-  // Search query in URL e.g. search.html?artist%3Ajimpu6%20language%3Aenglish
+  // Search query in URL e.g. search.html?artist%3Adokuneko_noil%20language%3Aenglish
   let queryString = decoded;
   if (queryString.includes('search.html?')) {
     queryString = queryString.split('search.html?')[1];
   }
 
-  // Extract artist filter
-  const artistMatch = queryString.match(/artist:([^\s&]+)/i);
   // Extract language filter
   const langMatch = queryString.match(/language:([^\s&]+)/i);
   const lang = (langMatch ? langMatch[1] : 'all').toLowerCase();
 
+  // Extract artist filter
+  const artistMatch = queryString.match(/artist:([^\s&]+)/i);
   if (artistMatch) {
-    const artist = artistMatch[1].toLowerCase().replace(/\s+/g, '_');
+    const artist = artistMatch[1];
+    const displayName = artist.replace(/[_\+]+/g, ' ');
     return {
-      title: `Tác giả: ${artist}`,
+      title: `Tác giả: ${displayName}`,
       subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: [
-        `https://${LTN_DOMAIN}/artist/${artist}-${lang}.nozomi`,
-        `https://${LTN_DOMAIN}/artist/${artist}-all.nozomi`
-      ]
+      nozomiUrls: getNozomiVariants('artist', artist, lang)
     };
   }
 
   // Extract group filter
   const grpMatch = queryString.match(/group:([^\s&]+)/i);
   if (grpMatch) {
-    const grp = grpMatch[1].toLowerCase().replace(/\s+/g, '_');
+    const grp = grpMatch[1];
+    const displayName = grp.replace(/[_\+]+/g, ' ');
     return {
-      title: `Nhóm: ${grp}`,
+      title: `Nhóm: ${displayName}`,
       subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: [
-        `https://${LTN_DOMAIN}/group/${grp}-${lang}.nozomi`,
-        `https://${LTN_DOMAIN}/group/${grp}-all.nozomi`
-      ]
+      nozomiUrls: getNozomiVariants('group', grp, lang)
+    };
+  }
+
+  // Extract character filter
+  const charSearchMatch = queryString.match(/character:([^\s&]+)/i);
+  if (charSearchMatch) {
+    const charName = charSearchMatch[1];
+    const displayName = charName.replace(/[_\+]+/g, ' ');
+    return {
+      title: `Nhân vật: ${displayName}`,
+      subtitle: `Ngôn ngữ: ${lang}`,
+      nozomiUrls: getNozomiVariants('character', charName, lang)
+    };
+  }
+
+  // Extract series filter
+  const seriesSearchMatch = queryString.match(/series:([^\s&]+)/i);
+  if (seriesSearchMatch) {
+    const seriesName = seriesSearchMatch[1];
+    const displayName = seriesName.replace(/[_\+]+/g, ' ');
+    return {
+      title: `Bộ truyện: ${displayName}`,
+      subtitle: `Ngôn ngữ: ${lang}`,
+      nozomiUrls: getNozomiVariants('series', seriesName, lang)
     };
   }
 
   // Extract tag filter
   const tMatch = queryString.match(/tag:([^\s&]+)/i);
   if (tMatch) {
-    const tag = tMatch[1].toLowerCase().replace(/\s+/g, '_');
+    const tag = tMatch[1];
+    const displayName = tag.replace(/[_\+]+/g, ' ');
     return {
-      title: `Thẻ: ${tag}`,
+      title: `Thẻ: ${displayName}`,
       subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: [
-        `https://${LTN_DOMAIN}/tag/${tag}-${lang}.nozomi`,
-        `https://${LTN_DOMAIN}/tag/${tag}-all.nozomi`
-      ]
+      nozomiUrls: getNozomiVariants('tag', tag, lang)
     };
   }
 
-  // Bare artist name input (e.g. "jimpu6")
+  // Bare artist/term input (e.g. "dokuneko noil" or "jimpu6")
   if (!queryString.includes('/') && !queryString.includes('?') && queryString.length >= 2) {
-    const artist = queryString.toLowerCase().replace(/\s+/g, '_');
+    const term = queryString.trim();
+    const displayName = term.replace(/[_\+]+/g, ' ');
     return {
-      title: `Tác giả: ${artist}`,
+      title: `Tác giả: ${displayName}`,
       subtitle: `Ngôn ngữ: english`,
-      nozomiUrls: [
-        `https://${LTN_DOMAIN}/artist/${artist}-english.nozomi`,
-        `https://${LTN_DOMAIN}/artist/${artist}-all.nozomi`
-      ]
+      nozomiUrls: getNozomiVariants('artist', term, 'english')
     };
   }
 
