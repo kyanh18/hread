@@ -1828,6 +1828,19 @@ class KhoTruyen {
 
   // ==================== HITOMI DOWNLOADER ====================
   async openHitomiModal() {
+    // If a download is already in progress, re-open modal to show progress
+    if (this.hitomiAbortController) {
+      this.hideFloatingProgress();
+      const modal = document.getElementById('hitomi-modal-overlay');
+      if (modal) modal.style.display = 'flex';
+      const progressCard = document.getElementById('hitomi-progress-card');
+      if (progressCard) {
+        progressCard.style.display = 'flex';
+        progressCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      return;
+    }
+
     this.hitomiScannedGalleries = [];
     this.hitomiSelectedGalleryIds.clear();
     this.hitomiScannedTitle = '';
@@ -1877,14 +1890,38 @@ class KhoTruyen {
   }
 
   closeHitomiModal() {
+    // If download is running, minimize instead of aborting
     if (this.hitomiAbortController) {
-      if (!confirm('Quá trình tải đang diễn ra. Bạn có chắc muốn dừng lại không?')) {
-        return;
-      }
-      this.cancelHitomiDownload();
+      this.minimizeHitomiModal();
+      return;
     }
     const modal = document.getElementById('hitomi-modal-overlay');
     if (modal) modal.style.display = 'none';
+  }
+
+  minimizeHitomiModal() {
+    const modal = document.getElementById('hitomi-modal-overlay');
+    if (modal) modal.style.display = 'none';
+    if (this.hitomiAbortController) {
+      this.showFloatingProgress();
+      this.showToast('Đang tải ngầm dưới nền... Bạn có thể đọc truyện bình thường!', 'info');
+    }
+  }
+
+  promptCancelHitomiDownload() {
+    if (confirm('Bạn có chắc muốn huỷ quá trình tải này không?')) {
+      this.cancelHitomiDownload();
+    }
+  }
+
+  showFloatingProgress() {
+    const f = document.getElementById('hitomi-floating-progress');
+    if (f) f.style.display = 'flex';
+  }
+
+  hideFloatingProgress() {
+    const f = document.getElementById('hitomi-floating-progress');
+    if (f) f.style.display = 'none';
   }
 
   toggleHitomiProxySettings() {
@@ -2015,22 +2052,40 @@ class KhoTruyen {
       this.hitomiScannedGalleries = [];
       this.hitomiSelectedGalleryIds.clear();
 
+      let rawGalleries = [];
       if (data.type === 'single') {
-        this.hitomiScannedGalleries = [data.gallery];
-        this.hitomiSelectedGalleryIds.add(data.gallery.id);
+        rawGalleries = [data.gallery];
         this.hitomiScannedTitle = data.gallery.title;
       } else if (data.type === 'collection') {
-        this.hitomiScannedGalleries = data.galleries || [];
-        this.hitomiScannedGalleries.forEach((g) => this.hitomiSelectedGalleryIds.add(g.id));
+        rawGalleries = data.galleries || [];
         this.hitomiScannedTitle = data.pageTitle || 'Hitomi Collection';
       }
 
-      if (this.hitomiScannedGalleries.length === 0) {
+      if (rawGalleries.length === 0) {
         this.showToast('Không tìm thấy bộ truyện nào từ link này!', 'error');
         if (previewSec) previewSec.style.display = 'none';
         if (footerBtn) footerBtn.style.display = 'none';
         return;
       }
+
+      // Check existing stories in database for duplicate detection
+      const existingStories = await this.db.getAllStories();
+      const existingTitles = new Set(existingStories.map((s) => s.name?.trim().toLowerCase()).filter(Boolean));
+      const existingIds = new Set(existingStories.map((s) => String(s.hitomiGalleryId || '')).filter(Boolean));
+
+      this.hitomiScannedGalleries = rawGalleries.map((g) => {
+        const isDup = existingIds.has(String(g.id)) || existingTitles.has(g.title?.trim().toLowerCase());
+        return { ...g, isDuplicate: isDup };
+      });
+
+      // By default, auto-select ONLY non-duplicate galleries!
+      let newCount = 0;
+      this.hitomiScannedGalleries.forEach((g) => {
+        if (!g.isDuplicate) {
+          this.hitomiSelectedGalleryIds.add(g.id);
+          newCount++;
+        }
+      });
 
       this.renderHitomiGalleryList();
       if (previewSec) {
@@ -2041,7 +2096,12 @@ class KhoTruyen {
       }
       if (footerBtn) footerBtn.style.display = 'inline-flex';
 
-      this.showToast(`Tìm thấy ${this.hitomiScannedGalleries.length} bộ truyện! ✓`, 'success');
+      const dupCount = this.hitomiScannedGalleries.length - newCount;
+      if (dupCount > 0) {
+        this.showToast(`Tìm thấy ${this.hitomiScannedGalleries.length} bộ (${dupCount} đã có trong kho, chọn sẵn ${newCount} bộ mới) ✓`, 'info');
+      } else {
+        this.showToast(`Tìm thấy ${this.hitomiScannedGalleries.length} bộ truyện mới! ✓`, 'success');
+      }
     } catch (err) {
       console.error('Hitomi scan error:', err);
       alert('Lỗi khi quét link Hitomi: ' + err.message + '\n\nLưu ý: Đảm bảo bạn đã triển khai Cloudflare Worker và nhập đúng link Worker.');
@@ -2061,8 +2121,20 @@ class KhoTruyen {
 
     const startBtn = document.getElementById('hitomi-start-btn');
     const footerBtn = document.getElementById('hitomi-start-btn-footer');
-    if (startBtn) startBtn.disabled = (count === 0);
-    if (footerBtn) footerBtn.disabled = (count === 0);
+    const disabled = count === 0;
+
+    if (startBtn) {
+      startBtn.disabled = disabled;
+      startBtn.innerHTML = disabled
+        ? 'Chưa chọn bộ nào để tải'
+        : `🚀 Bắt đầu tải về (<span id="hitomi-selected-count">${count}</span> bộ)`;
+    }
+    if (footerBtn) {
+      footerBtn.disabled = disabled;
+      footerBtn.innerHTML = disabled
+        ? 'Chưa chọn bộ nào'
+        : `🚀 Bắt đầu tải (<span id="hitomi-selected-count-footer">${count}</span> bộ)`;
+    }
   }
 
   renderHitomiGalleryList() {
@@ -2070,8 +2142,18 @@ class KhoTruyen {
     const summary = document.getElementById('hitomi-preview-summary');
     const subtitle = document.getElementById('hitomi-preview-subtitle');
 
-    if (summary) summary.textContent = `Tìm thấy ${this.hitomiScannedGalleries.length} bộ truyện`;
-    if (subtitle) subtitle.textContent = this.hitomiScannedTitle;
+    const totalCount = this.hitomiScannedGalleries.length;
+    const dupCount = this.hitomiScannedGalleries.filter((g) => g.isDuplicate).length;
+    const newCount = totalCount - dupCount;
+
+    if (summary) summary.textContent = `Tìm thấy ${totalCount} bộ truyện`;
+    if (subtitle) {
+      if (dupCount > 0) {
+        subtitle.textContent = `${this.hitomiScannedTitle} • ${dupCount} bộ đã có trong kho, ${newCount} bộ mới`;
+      } else {
+        subtitle.textContent = `${this.hitomiScannedTitle} • ${totalCount} bộ mới`;
+      }
+    }
     this.updateHitomiSelectionCount();
 
     if (!list) return;
@@ -2079,8 +2161,9 @@ class KhoTruyen {
     list.innerHTML = this.hitomiScannedGalleries
       .map((gallery) => {
         const isSelected = this.hitomiSelectedGalleryIds.has(gallery.id);
+        const isDup = gallery.isDuplicate;
         return `
-          <div class="hitomi-gallery-item ${isSelected ? 'selected' : ''}" data-id="${gallery.id}" onclick="app.toggleHitomiGallerySelection('${gallery.id}')">
+          <div class="hitomi-gallery-item ${isSelected ? 'selected' : ''} ${isDup ? 'is-duplicate' : ''}" data-id="${gallery.id}" onclick="app.toggleHitomiGallerySelection('${gallery.id}')">
             <div class="custom-checkbox ${isSelected ? 'checked' : ''}" style="margin-right: 2px;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                 <polyline points="20 6 9 17 4 12"></polyline>
@@ -2091,6 +2174,7 @@ class KhoTruyen {
               <div class="hitomi-gallery-meta">
                 <span>Mã: #${gallery.id}</span>
                 ${gallery.pageCount ? `<span>🖼️ ${gallery.pageCount} trang</span>` : ''}
+                ${isDup ? `<span class="hitomi-duplicate-tag">✓ Đã có trong kho</span>` : ''}
               </div>
             </div>
           </div>
@@ -2129,6 +2213,52 @@ class KhoTruyen {
     this.renderHitomiGalleryList();
   }
 
+  selectOnlyNewHitomiGalleries() {
+    this.hitomiSelectedGalleryIds.clear();
+    this.hitomiScannedGalleries.forEach((g) => {
+      if (!g.isDuplicate) {
+        this.hitomiSelectedGalleryIds.add(g.id);
+      }
+    });
+    this.renderHitomiGalleryList();
+    const count = this.hitomiSelectedGalleryIds.size;
+    this.showToast(`Đã chọn ${count} bộ truyện mới ✓`, 'info');
+  }
+
+  updateDownloadProgress(data) {
+    const { gIdx, totalGalleries, galleryTitle, currentImg, totalImages, overallPercent } = data;
+    const progressCard = document.getElementById('hitomi-progress-card');
+    const statusText = document.getElementById('hitomi-status-text');
+    const detailText = document.getElementById('hitomi-detail-status-text');
+    const percentText = document.getElementById('hitomi-percent-text');
+    const fillEl = document.getElementById('hitomi-progress-fill');
+
+    if (progressCard) progressCard.style.display = 'flex';
+    if (statusText) statusText.textContent = `[${gIdx + 1}/${totalGalleries}] ${galleryTitle}`;
+    if (detailText) {
+      detailText.textContent = totalImages > 0
+        ? `Đang tải trang ${currentImg} / ${totalImages} (Tải song song 3 luồng)`
+        : 'Đang chuẩn bị...';
+    }
+    if (percentText) percentText.textContent = `${overallPercent}%`;
+    if (fillEl) fillEl.style.width = `${overallPercent}%`;
+
+    // Floating background bar
+    const floatingTitle = document.getElementById('hitomi-floating-title');
+    const floatingDetail = document.getElementById('hitomi-floating-detail');
+    const floatingPercent = document.getElementById('hitomi-floating-percent');
+    const floatingFill = document.getElementById('hitomi-floating-fill');
+
+    if (floatingTitle) floatingTitle.textContent = `[${gIdx + 1}/${totalGalleries}] ${galleryTitle}`;
+    if (floatingDetail) {
+      floatingDetail.textContent = totalImages > 0
+        ? `Bộ ${gIdx + 1}/${totalGalleries} • Trang ${currentImg}/${totalImages}`
+        : `Bộ ${gIdx + 1}/${totalGalleries}`;
+    }
+    if (floatingPercent) floatingPercent.textContent = `${overallPercent}%`;
+    if (floatingFill) floatingFill.style.width = `${overallPercent}%`;
+  }
+
   cancelHitomiDownload() {
     if (this.hitomiAbortController) {
       this.hitomiAbortController.abort();
@@ -2136,6 +2266,7 @@ class KhoTruyen {
       this.showToast('Đã dừng tải truyện.', 'info');
       const progressCard = document.getElementById('hitomi-progress-card');
       if (progressCard) progressCard.style.display = 'none';
+      this.hideFloatingProgress();
       const startBtn = document.getElementById('hitomi-start-btn');
       const footerBtn = document.getElementById('hitomi-start-btn-footer');
       if (startBtn) startBtn.disabled = false;
@@ -2155,10 +2286,6 @@ class KhoTruyen {
 
     const selectedCatId = document.getElementById('hitomi-category-select')?.value;
     const progressCard = document.getElementById('hitomi-progress-card');
-    const statusText = document.getElementById('hitomi-status-text');
-    const detailText = document.getElementById('hitomi-detail-status-text');
-    const percentText = document.getElementById('hitomi-percent-text');
-    const fillEl = document.getElementById('hitomi-progress-fill');
     const startBtn = document.getElementById('hitomi-start-btn');
     const footerBtn = document.getElementById('hitomi-start-btn-footer');
 
@@ -2184,8 +2311,14 @@ class KhoTruyen {
         if (signal.aborted) break;
 
         const gItem = selectedGalleries[gIdx];
-        if (statusText) statusText.textContent = `[${gIdx + 1}/${totalGalleries}] Đang lấy thông tin: ${gItem.title}...`;
-        if (detailText) detailText.textContent = 'Đang phân giải danh sách ảnh...';
+        this.updateDownloadProgress({
+          gIdx,
+          totalGalleries,
+          galleryTitle: gItem.title,
+          currentImg: 0,
+          totalImages: 0,
+          overallPercent: Math.round((gIdx / totalGalleries) * 100),
+        });
 
         // 1. Fetch gallery details
         const gRes = await fetch(`${this.hitomiProxyUrl}/api/gallery?id=${gItem.id}`, { signal });
@@ -2209,44 +2342,74 @@ class KhoTruyen {
         const storyId = this.generateId();
         const now = Date.now();
         const totalImages = imagesList.length;
-        let downloadedBlobs = [];
+        const downloadedBlobs = new Array(totalImages);
+        let completedImages = 0;
 
-        // 2. Download all images sequentially
-        for (let imgIdx = 0; imgIdx < totalImages; imgIdx++) {
-          if (signal.aborted) break;
+        // 2. Download images in parallel with Concurrency = 3 and auto-retry
+        const CONCURRENCY = 3;
+        let nextIndex = 0;
 
-          const imgObj = imagesList[imgIdx];
-          const imgPercent = Math.round(((imgIdx + 1) / totalImages) * 100);
-          const overallPercent = Math.round(((gIdx + (imgIdx / totalImages)) / totalGalleries) * 100);
+        const downloadWorker = async () => {
+          while (nextIndex < totalImages && !signal.aborted) {
+            const imgIdx = nextIndex++;
+            const imgObj = imagesList[imgIdx];
 
-          if (statusText) statusText.textContent = `[${gIdx + 1}/${totalGalleries}] ${galleryData.title}`;
-          if (detailText) detailText.textContent = `Đang tải trang ${imgIdx + 1} / ${totalImages} (${imgPercent}%)`;
-          if (percentText) percentText.textContent = `${overallPercent}%`;
-          if (fillEl) fillEl.style.width = `${overallPercent}%`;
+            // Up to 2 retries on network glitch
+            let blob = null;
+            let lastErr = null;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              if (signal.aborted) break;
+              try {
+                const imgFetchUrl = `${this.hitomiProxyUrl}/api/image?url=${encodeURIComponent(imgObj.url)}&id=${gItem.id}`;
+                const imgBlobRes = await fetch(imgFetchUrl, { signal });
+                if (!imgBlobRes.ok) throw new Error(`HTTP ${imgBlobRes.status}`);
+                blob = await imgBlobRes.blob();
+                break;
+              } catch (err) {
+                lastErr = err;
+                if (signal.aborted) break;
+                if (attempt < 2) await new Promise((r) => setTimeout(r, 600));
+              }
+            }
 
-          // Download image blob via proxy
-          const imgFetchUrl = `${this.hitomiProxyUrl}/api/image?url=${encodeURIComponent(imgObj.url)}&id=${gItem.id}`;
-          const imgBlobRes = await fetch(imgFetchUrl, { signal });
-          if (!imgBlobRes.ok) {
-            throw new Error(`Lỗi tải trang ${imgIdx + 1}: HTTP ${imgBlobRes.status}`);
+            if (signal.aborted) break;
+            if (!blob) {
+              throw new Error(`Lỗi tải trang ${imgIdx + 1}: ${lastErr?.message || 'Không thể tải ảnh'}`);
+            }
+
+            // Save image to IndexedDB preserving page order
+            await this.db.addImage({
+              id: this.generateId(),
+              storyId: storyId,
+              name: imgObj.name || `Trang ${imgIdx + 1}`,
+              data: blob,
+              order: imgIdx,
+            });
+
+            downloadedBlobs[imgIdx] = {
+              order: imgIdx,
+              name: imgObj.name || `Trang ${imgIdx + 1}`,
+              data: blob,
+            };
+
+            completedImages++;
+            const overallPercent = Math.round(((gIdx + (completedImages / totalImages)) / totalGalleries) * 100);
+            this.updateDownloadProgress({
+              gIdx,
+              totalGalleries,
+              galleryTitle: galleryData.title || gItem.title,
+              currentImg: completedImages,
+              totalImages,
+              overallPercent,
+            });
           }
+        };
 
-          const blob = await imgBlobRes.blob();
-          downloadedBlobs.push({
-            order: imgIdx,
-            name: imgObj.name || `Trang ${imgIdx + 1}`,
-            data: blob,
-          });
-
-          // Save image to IndexedDB
-          await this.db.addImage({
-            id: this.generateId(),
-            storyId: storyId,
-            name: imgObj.name || `Trang ${imgIdx + 1}`,
-            data: blob,
-            order: imgIdx,
-          });
-        }
+        const workers = Array.from(
+          { length: Math.min(CONCURRENCY, totalImages) },
+          () => downloadWorker()
+        );
+        await Promise.all(workers);
 
         if (signal.aborted) {
           await this.db.deleteStory(storyId);
@@ -2255,20 +2418,22 @@ class KhoTruyen {
 
         // 3. Create thumbnail cover from 1st image
         let coverData = '';
-        if (downloadedBlobs.length > 0) {
+        const validBlobs = downloadedBlobs.filter(Boolean);
+        if (validBlobs.length > 0) {
           try {
-            coverData = await this.generateThumbnail(downloadedBlobs[0].data, 300, 400);
+            coverData = await this.generateThumbnail(validBlobs[0].data, 300, 400);
           } catch (e) {
             console.warn('Could not generate cover for hitomi story:', galleryData.title);
           }
         }
 
-        // 4. Save story metadata
+        // 4. Save story metadata (including hitomiGalleryId for future duplicate detection!)
         const story = {
           id: storyId,
           name: galleryData.title || gItem.title,
           coverData: coverData,
-          imageCount: downloadedBlobs.length,
+          imageCount: validBlobs.length,
+          hitomiGalleryId: gItem.id,
           createdAt: now + gIdx,
           updatedAt: now + gIdx,
         };
@@ -2276,7 +2441,86 @@ class KhoTruyen {
         await this.db.addStory(story);
         createdStoryIds.push(storyId);
         completedGalleries++;
+
+        // Mark as duplicate in active scanned list so UI updates immediately
+        gItem.isDuplicate = true;
       }
+
+      if (!signal.aborted && completedGalleries > 0) {
+        // Handle Category Assignment
+        if (selectedCatId === '') {
+          // Auto create category by artist name or page title
+          const catName = detectedArtistName ? `Tác giả: ${detectedArtistName}` : (this.hitomiScannedTitle || 'Hitomi');
+          let cat = this.categories.find((c) => c.name.toLowerCase() === catName.toLowerCase());
+          if (!cat) {
+            cat = {
+              id: 'cat_' + this.generateId(),
+              name: catName,
+              storyIds: [...createdStoryIds],
+              createdAt: Date.now(),
+            };
+          } else {
+            cat.storyIds = Array.from(new Set([...(cat.storyIds || []), ...createdStoryIds]));
+            cat.updatedAt = Date.now();
+          }
+          await this.db.addCategory(cat);
+          this.selectedCategoryId = cat.id; // switch view
+        } else if (selectedCatId !== '_none_') {
+          const cat = this.categories.find((c) => c.id === selectedCatId);
+          if (cat) {
+            cat.storyIds = Array.from(new Set([...(cat.storyIds || []), ...createdStoryIds]));
+            cat.updatedAt = Date.now();
+            await this.db.addCategory(cat);
+            this.selectedCategoryId = cat.id;
+          }
+        }
+
+        this.updateDownloadProgress({
+          gIdx: totalGalleries - 1,
+          totalGalleries,
+          galleryTitle: 'Hoàn tất tải về!',
+          currentImg: 100,
+          totalImages: 100,
+          overallPercent: 100,
+        });
+
+        const statusText = document.getElementById('hitomi-status-text');
+        const detailText = document.getElementById('hitomi-detail-status-text');
+        if (statusText) statusText.textContent = 'Hoàn tất tải về!';
+        if (detailText) detailText.textContent = `Đã lưu an toàn ${completedGalleries} bộ truyện vào kho!`;
+
+        const floatingTitle = document.getElementById('hitomi-floating-title');
+        const floatingDetail = document.getElementById('hitomi-floating-detail');
+        if (floatingTitle) floatingTitle.textContent = '✓ Hoàn tất tải về!';
+        if (floatingDetail) floatingDetail.textContent = `Đã lưu ${completedGalleries} bộ truyện`;
+
+        this.showToast(`Đã tải thành công ${completedGalleries} bộ truyện vào app ✓`, 'success');
+
+        setTimeout(async () => {
+          this.hideFloatingProgress();
+          this.closeHitomiModal();
+          await this.loadLibrary();
+          await this.updateStorageUI();
+        }, 1500);
+      }
+    } catch (err) {
+      if (signal.aborted) {
+        console.log('Download aborted by user');
+      } else {
+        console.error('Hitomi download error:', err);
+        if (err.name === 'QuotaExceededError' || err.message?.toLowerCase().includes('quota')) {
+          alert('Bộ nhớ điện thoại / trình duyệt đã đầy (QuotaExceededError)! Hãy xoá bớt truyện hoặc sao lưu trước khi tải tiếp.');
+        } else {
+          this.showToast('Lỗi khi tải truyện: ' + err.message, 'error');
+        }
+      }
+    } finally {
+      this.hitomiAbortController = null;
+      if (startBtn) startBtn.disabled = false;
+      if (footerBtn) footerBtn.disabled = false;
+      setTimeout(() => this.hideFloatingProgress(), 4000);
+    }
+  }
 
       if (!signal.aborted && completedGalleries > 0) {
         // Handle Category Assignment

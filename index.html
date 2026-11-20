@@ -598,6 +598,8 @@
               <div class="category-select-quick-actions">
                 <button type="button" class="btn-text" onclick="app.selectAllHitomiGalleries(true)">Chọn hết</button>
                 <span style="color: var(--text-muted);">•</span>
+                <button type="button" class="btn-text" id="hitomi-select-new-btn" style="color: var(--accent-light); font-weight: 600;" onclick="app.selectOnlyNewHitomiGalleries()">Chỉ bộ mới</button>
+                <span style="color: var(--text-muted);">•</span>
                 <button type="button" class="btn-text" onclick="app.selectAllHitomiGalleries(false)">Bỏ chọn</button>
               </div>
             </div>
@@ -628,9 +630,14 @@
             <div class="backup-progress-bar-bg">
               <div class="backup-progress-bar-fill" id="hitomi-progress-fill" style="width: 0%;"></div>
             </div>
-            <button class="btn btn-secondary" id="hitomi-cancel-btn" style="margin-top: 6px; width: 100%; padding: 8px; font-size: 0.78rem;" onclick="app.cancelHitomiDownload()">
-              ✕ Huỷ quá trình tải
-            </button>
+            <div style="display: flex; gap: 8px; margin-top: 6px;">
+              <button class="btn btn-secondary" style="flex: 1; padding: 9px; font-size: 0.78rem;" onclick="app.minimizeHitomiModal()">
+                🔽 Thu nhỏ để đọc truyện
+              </button>
+              <button class="btn btn-secondary" id="hitomi-cancel-btn" style="flex: 1; padding: 9px; font-size: 0.78rem; color: var(--danger); border-color: rgba(255, 107, 107, 0.3);" onclick="app.promptCancelHitomiDownload()">
+                ✕ Huỷ tải
+              </button>
+            </div>
           </div>
 
         </div>
@@ -644,6 +651,24 @@
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- ==================== HITOMI FLOATING BACKGROUND DOWNLOAD BAR ==================== -->
+    <div id="hitomi-floating-progress" class="hitomi-floating-progress" style="display: none;" onclick="app.openHitomiModal()">
+      <div class="hitomi-floating-icon">
+        <span class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></span>
+      </div>
+      <div class="hitomi-floating-content">
+        <div class="hitomi-floating-title" id="hitomi-floating-title">Đang tải truyện...</div>
+        <div class="hitomi-floating-meta">
+          <span id="hitomi-floating-detail">Bộ 0/0 • Trang 0/0</span>
+          <span id="hitomi-floating-percent" style="font-weight: 700; color: var(--accent-light);">0%</span>
+        </div>
+        <div class="hitomi-floating-bar-bg">
+          <div class="hitomi-floating-bar-fill" id="hitomi-floating-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+      <button class="hitomi-floating-close" onclick="event.stopPropagation(); app.promptCancelHitomiDownload()" title="Huỷ tải">✕</button>
     </div>
 
   </div>
