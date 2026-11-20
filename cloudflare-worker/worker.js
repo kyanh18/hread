@@ -475,13 +475,34 @@ async function fetchGg() {
   }
 
   const script = await res.text();
-  const runGg = new Function(`
-    var gg = {};
-    ${script}
-    return gg;
-  `);
 
-  return runGg();
+  // Parse b prefix
+  const bMatch = script.match(/b:\s*['"]([^'"]+)['"]/);
+  const bVal = bMatch ? bMatch[1] : '';
+
+  // Parse case numbers for m function without eval / new Function
+  const caseNumbers = new Set();
+  const caseRegex = /case\s+(\d+):/g;
+  let match;
+  while ((match = caseRegex.exec(script)) !== null) {
+    caseNumbers.add(parseInt(match[1], 10));
+  }
+
+  let oDefault = 1;
+  const oMatch = script.match(/var\s+o\s*=\s*(\d+)/);
+  if (oMatch) oDefault = parseInt(oMatch[1], 10);
+  const oSwapped = oDefault === 1 ? 0 : 1;
+
+  return {
+    b: bVal,
+    s: function(h) {
+      const m = /(..)(.)$/.exec(h);
+      return m ? parseInt(m[2] + m[1], 16).toString(10) : '';
+    },
+    m: function(g) {
+      return caseNumbers.has(g) ? oSwapped : oDefault;
+    }
+  };
 }
 
 /**
