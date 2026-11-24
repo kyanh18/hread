@@ -1608,6 +1608,14 @@ class KhoTruyen {
     };
   }
 
+  toggleRestoreModeUI() {
+    const isMerge = document.getElementById('restore-mode-merge')?.checked;
+    const skipContainer = document.getElementById('restore-skip-duplicates-container');
+    if (skipContainer) {
+      skipContainer.style.display = isMerge ? 'flex' : 'none';
+    }
+  }
+
   // --- Shared Backup Data Applier / Restorer ---
   async applyBackupData(data, mode = 'merge') {
     if (!data || data.app !== 'KhoTruyen' || !Array.isArray(data.stories)) {
@@ -1623,26 +1631,64 @@ class KhoTruyen {
       await this.db.clearAllData();
     }
 
-    // Restore categories
-    this.showBackupProgress('Đang khôi phục danh mục...', 35);
-    if (Array.isArray(data.categories)) {
-      for (const cat of data.categories) {
-        await this.db.addCategory(cat);
+    const skipDuplicates = document.getElementById('restore-skip-duplicates')?.checked ?? true;
+    let storiesToRestore = data.stories;
+    let duplicateCount = 0;
+    const skippedStoryIds = new Set();
+
+    if (mode === 'merge' && skipDuplicates) {
+      this.showBackupProgress('Đang quét truyện trùng lặp với kho...', 28);
+      const existingStories = await this.db.getAllStories();
+      const existingIds = new Set(existingStories.map((s) => s.id));
+      const existingHitomiIds = new Set(existingStories.map((s) => String(s.hitomiGalleryId || '')).filter(Boolean));
+      const existingNames = new Set(existingStories.map((s) => s.name?.trim().toLowerCase()).filter(Boolean));
+
+      storiesToRestore = [];
+      for (const story of data.stories) {
+        const isDup =
+          existingIds.has(story.id) ||
+          (story.hitomiGalleryId && existingHitomiIds.has(String(story.hitomiGalleryId))) ||
+          (story.name && existingNames.has(story.name.trim().toLowerCase()));
+
+        if (isDup) {
+          duplicateCount++;
+          skippedStoryIds.add(story.id);
+        } else {
+          storiesToRestore.push(story);
+        }
       }
     }
 
-    // Restore stories
+    // Restore categories (merge categories if merge mode)
+    this.showBackupProgress('Đang khôi phục danh mục...', 35);
+    if (Array.isArray(data.categories)) {
+      const existingCats = await this.db.getAllCategories();
+      const existingCatMap = new Map(existingCats.map((c) => [c.name.toLowerCase(), c]));
+
+      for (const cat of data.categories) {
+        const existingCat = existingCatMap.get(cat.name.toLowerCase());
+        if (existingCat) {
+          existingCat.storyIds = Array.from(new Set([...(existingCat.storyIds || []), ...(cat.storyIds || [])]));
+          await this.db.addCategory(existingCat);
+        } else {
+          await this.db.addCategory(cat);
+        }
+      }
+    }
+
+    // Restore stories (only non-duplicates)
     this.showBackupProgress('Đang khôi phục danh sách truyện...', 50);
-    for (const story of data.stories) {
+    for (const story of storiesToRestore) {
       await this.db.addStory(story);
     }
 
-    // Restore images (stored as Blobs for maximum space optimization!)
-    const images = Array.isArray(data.images) ? data.images : [];
+    // Restore images (stored as Blobs, skipping images of duplicate stories)
+    const allImages = Array.isArray(data.images) ? data.images : [];
+    const imagesToRestore = allImages.filter((img) => !skippedStoryIds.has(img.storyId));
     let restoredImgs = 0;
-    const totalImgs = images.length;
+    const totalImgs = imagesToRestore.length;
 
-    for (const img of images) {
+    for (const img of imagesToRestore) {
       let blobData = null;
       if (typeof img.data === 'string' && img.data.startsWith('data:')) {
         blobData = await this.dataUrlToBlob(img.data);
@@ -1668,7 +1714,16 @@ class KhoTruyen {
     this.showBackupProgress('Khôi phục hoàn tất!', 100);
     await this.loadLibrary();
     await this.updateStorageUI();
-    this.showToast(`Khôi phục thành công ${data.stories.length} truyện ✓`, 'success');
+
+    if (duplicateCount > 0) {
+      if (storiesToRestore.length === 0) {
+        this.showToast(`Tất cả ${duplicateCount} bộ truyện trong bản sao lưu đã có sẵn trong kho!`, 'info');
+      } else {
+        this.showToast(`Khôi phục thành công ${storiesToRestore.length} bộ truyện mới (đã bỏ qua ${duplicateCount} bộ trùng lặp) ✓`, 'success');
+      }
+    } else {
+      this.showToast(`Khôi phục thành công ${storiesToRestore.length} truyện ✓`, 'success');
+    }
 
     setTimeout(() => {
       this.closeBackupModal();

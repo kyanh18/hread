@@ -508,12 +508,16 @@
 
             <div class="restore-mode-options">
               <label class="restore-radio-label">
-                <input type="radio" name="restore-mode" id="restore-mode-merge" value="merge" checked>
+                <input type="radio" name="restore-mode" id="restore-mode-merge" value="merge" checked onchange="app.toggleRestoreModeUI()">
                 <span>Gộp vào kho hiện tại (không mất truyện cũ)</span>
               </label>
               <label class="restore-radio-label">
-                <input type="radio" name="restore-mode" id="restore-mode-replace" value="replace">
+                <input type="radio" name="restore-mode" id="restore-mode-replace" value="replace" onchange="app.toggleRestoreModeUI()">
                 <span>Thay thế toàn bộ kho truyện</span>
+              </label>
+              <label class="restore-radio-label" id="restore-skip-duplicates-container" style="margin-top: 4px; padding-top: 6px; border-top: 1px dashed var(--border);">
+                <input type="checkbox" id="restore-skip-duplicates" checked>
+                <span style="color: var(--accent-light); font-weight: 600;">Tự động bỏ qua truyện đã có (chống trùng lặp)</span>
               </label>
             </div>
 
@@ -787,6 +791,6 @@
     }
   </script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="./app.js?v=12"></script>
+  <script src="./app.js?v=13"></script>
 </body>
 </html>
