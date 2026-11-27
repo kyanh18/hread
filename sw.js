@@ -1,9 +1,9 @@
-const CACHE_NAME = 'kho-truyen-v13';
+const CACHE_NAME = 'kho-truyen-v14';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
-  './styles.css',
-  './app.js',
+  './styles.css?v=14',
+  './app.js?v=14',
   './manifest.json'
 ];
 
@@ -33,8 +33,8 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Network-first for scripts and html so bug fixes apply immediately
-  if (url.origin === location.origin && (url.pathname.endsWith('.js') || url.pathname.endsWith('.html') || url.pathname.endsWith('/'))) {
+  // Network-first for scripts, styles, and html so bug fixes apply immediately
+  if (url.origin === location.origin && (url.pathname.endsWith('.js') || url.pathname.endsWith('.css') || url.pathname.endsWith('.html') || url.pathname.endsWith('/'))) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
@@ -44,13 +44,13 @@ self.addEventListener('fetch', (event) => {
           }
           return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match(event.request, { ignoreSearch: true }))
     );
     return;
   }
 
   // Cache-first for offline assets
   event.respondWith(
-    caches.match(event.request).then((response) => response || fetch(event.request))
+    caches.match(event.request, { ignoreSearch: true }).then((response) => response || fetch(event.request))
   );
 });

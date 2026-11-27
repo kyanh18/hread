@@ -172,6 +172,7 @@ class KhoTruyen {
     this.batchDetectedFolders = [];
     this.lastLibraryScrollY = 0;
     this.lastViewedStoryId = null;
+    this.currentStoryOrder = [];
     this.isStoragePersisted = false;
     this.storageEstimate = { usage: 0, quota: 0, percent: 0 };
     this.hitomiProxyUrl = localStorage.getItem('khotruyen_hitomi_proxy') || 'https://hread.kyanh1801.workers.dev';
@@ -183,6 +184,34 @@ class KhoTruyen {
     this.gdriveFolderName = localStorage.getItem('khotruyen_gdrive_folder_name') || 'KhoTruyen';
     this.gdriveAccessToken = null;
     this.gdriveTokenExpiresAt = 0;
+
+    // Reader state & settings
+    this.readerSettings = this.loadReaderSettings();
+    this._readerScrollHandler = null;
+    this._readerObserver = null;
+    this._saveProgressTimer = null;
+    this._scrubUnlockTimer = null;
+    this._wakeLock = null;
+    this._isScrubbing = false;
+    this._isResuming = false;
+    this._isExitingReader = false;
+    this._allowPopstateExit = false;
+    this._readerSessionId = 0;
+    this._readerCurrentPage = 1;
+    this._lastTapTime = 0;
+    this._lastTapX = 0;
+    this._lastTapY = 0;
+    this._singleTapTimer = null;
+  }
+
+  loadReaderSettings() {
+    const defaults = { width: '', gap: 0, brightness: 100, warmth: 0, wakeLock: true };
+    try {
+      const saved = JSON.parse(localStorage.getItem('khotruyen_reader_settings') || '{}');
+      return { ...defaults, ...(saved && typeof saved === 'object' ? saved : {}) };
+    } catch (e) {
+      return defaults;
+    }
   }
 
   createManagedUrl(blobOrData) {
@@ -396,6 +425,8 @@ class KhoTruyen {
       ? storiesToShow.filter((s) => s.name.toLowerCase().includes(this.searchTerm.toLowerCase()))
       : storiesToShow;
 
+    this.currentStoryOrder = filtered.map((s) => s.id);
+
     // Update stats
     const statsEl = document.getElementById('library-stats');
     const totalImages = allStories.reduce((sum, s) => sum + (s.imageCount || 0), 0);
@@ -470,13 +501,22 @@ class KhoTruyen {
     }
 
     grid.innerHTML = filtered
-      .map(
-        (story) => `
+      .map((story) => {
+        const total = story.imageCount || 0;
+        const lastPage = story.lastReadPage || 0;
+        const progressBadge =
+          lastPage > 1 && total > 0
+            ? lastPage >= total
+              ? '<span class="story-progress-badge done">✓ Đã đọc</span>'
+              : `<span class="story-progress-badge">📖 ${lastPage}/${total}</span>`
+            : '';
+
+        return `
       <div class="story-card" data-id="${story.id}" onclick="app.openStory('${story.id}')" oncontextmenu="event.preventDefault(); app.showStoryMenu('${story.id}')">
         <div class="story-cover">
           ${
             story.coverData
-              ? `<img src="${story.coverData}" alt="${story.name}" loading="lazy">`
+              ? `<img src="${story.coverData}" alt="${this.escapeHTML(story.name)}" loading="lazy">`
               : `<div class="cover-placeholder">
                   <div class="cover-icon">📖</div>
                   <div class="cover-text">Chưa có ảnh bìa</div>
@@ -487,13 +527,14 @@ class KhoTruyen {
           <div class="story-title">${this.escapeHTML(story.name)}</div>
           <div class="story-meta">
             <span class="story-chapter-badge">
-              🖼 ${story.imageCount || 0}
+              🖼 ${total}
             </span>
+            ${progressBadge}
           </div>
         </div>
       </div>
-    `
-      )
+    `;
+      })
       .join('');
   }
 
@@ -531,6 +572,11 @@ class KhoTruyen {
   }
 
   // ==================== CREATE / EDIT ====================
+  exitCreate() {
+    this.revokeManagedUrls();
+    this.showScreen('library', true);
+  }
+
   openCreate() {
     this.revokeManagedUrls();
     this.currentStory = null;
@@ -822,6 +868,7 @@ class KhoTruyen {
       const coverData = await this.generateThumbnail(this.editImages[0].data, 300, 400);
 
       const story = {
+        ...(this.currentStory || {}),
         id: storyId,
         name: name,
         coverData: coverData,
@@ -848,6 +895,7 @@ class KhoTruyen {
         });
       }
 
+      this.revokeManagedUrls();
       this.showToast(this.currentStory ? 'Đã cập nhật truyện ✓' : 'Đã tạo truyện mới ✓', 'success');
       this.showScreen('library');
       await this.loadLibrary();
@@ -906,7 +954,278 @@ class KhoTruyen {
   }
 
   // ==================== READER ====================
-  async openStory(storyId) {
+  toggleReaderSettings(forceState) {
+    const panel = document.getElementById('reader-settings-panel');
+    if (!panel) return;
+    const shouldOpen = typeof forceState === 'boolean' ? forceState : !panel.classList.contains('open');
+    panel.classList.toggle('open', shouldOpen);
+    const btn = document.getElementById('reader-settings-btn');
+    if (btn) btn.classList.toggle('active', shouldOpen);
+    if (shouldOpen) {
+      this.applyReaderSettings();
+    }
+  }
+
+  setReaderSetting(key, value) {
+    this.readerSettings = { ...this.readerSettings, [key]: value };
+    try {
+      localStorage.setItem('khotruyen_reader_settings', JSON.stringify(this.readerSettings));
+    } catch (e) {}
+    this.applyReaderSettings();
+
+    if (key === 'wakeLock') {
+      const readerScreen = document.getElementById('screen-reader');
+      if (value && readerScreen?.classList.contains('active')) {
+        this.requestWakeLock();
+      } else if (!value) {
+        this.releaseWakeLock();
+      }
+    }
+  }
+
+  applyReaderSettings() {
+    const screen = document.getElementById('screen-reader');
+    const content = document.getElementById('reader-content');
+    const { width, gap, brightness, warmth, wakeLock } = this.readerSettings;
+
+    if (screen) {
+      if (width) {
+        screen.style.setProperty('--reader-max-width', width);
+      } else {
+        screen.style.removeProperty('--reader-max-width');
+      }
+      screen.style.setProperty('--reader-page-gap', `${Number(gap) || 0}px`);
+    }
+
+    const safeBrightness = Math.min(100, Math.max(40, Number(brightness) || 100));
+    const safeWarmth = Math.min(50, Math.max(0, Number(warmth) || 0));
+    if (content) {
+      content.style.filter =
+        safeBrightness === 100 && safeWarmth === 0
+          ? ''
+          : `brightness(${safeBrightness}%) sepia(${safeWarmth}%)`;
+    }
+
+    const effectiveWidth = width || (window.innerWidth >= 768 ? '700px' : '100%');
+    document.querySelectorAll('.reader-chip[data-reader-width]').forEach((chip) => {
+      chip.classList.toggle('active', chip.dataset.readerWidth === effectiveWidth);
+    });
+
+    const gapVal = String(Number(gap) || 0);
+    document.querySelectorAll('.reader-chip[data-reader-gap]').forEach((chip) => {
+      chip.classList.toggle('active', chip.dataset.readerGap === gapVal);
+    });
+
+    const brightnessSlider = document.getElementById('reader-brightness-slider');
+    const brightnessVal = document.getElementById('reader-brightness-val');
+    if (brightnessSlider) brightnessSlider.value = String(safeBrightness);
+    if (brightnessVal) brightnessVal.textContent = `${safeBrightness}%`;
+
+    const warmthSlider = document.getElementById('reader-warmth-slider');
+    const warmthVal = document.getElementById('reader-warmth-val');
+    if (warmthSlider) warmthSlider.value = String(safeWarmth);
+    if (warmthVal) warmthVal.textContent = `${safeWarmth}%`;
+
+    const wakeToggle = document.getElementById('reader-wakelock-toggle');
+    if (wakeToggle) wakeToggle.checked = wakeLock !== false;
+  }
+
+  async requestWakeLock() {
+    if (this.readerSettings?.wakeLock === false) return;
+    if (!('wakeLock' in navigator)) return;
+    try {
+      if (this._wakeLock && !this._wakeLock.released) return;
+      this._wakeLock = await navigator.wakeLock.request('screen');
+      this._wakeLock.addEventListener('release', () => {
+        if (this._wakeLock && this._wakeLock.released) {
+          this._wakeLock = null;
+        }
+      });
+    } catch (e) {
+      // Ignore unsupported or disallowed wake lock errors
+    }
+  }
+
+  async releaseWakeLock() {
+    if (this._wakeLock) {
+      try {
+        await this._wakeLock.release();
+      } catch (e) {}
+      this._wakeLock = null;
+    }
+  }
+
+  cleanupReaderTrackers() {
+    if (this._readerScrollHandler) {
+      window.removeEventListener('scroll', this._readerScrollHandler);
+      this._readerScrollHandler = null;
+    }
+    if (this._readerObserver) {
+      this._readerObserver.disconnect();
+      this._readerObserver = null;
+    }
+    if (this._saveProgressTimer) {
+      clearTimeout(this._saveProgressTimer);
+      this._saveProgressTimer = null;
+    }
+    if (this._scrubUnlockTimer) {
+      clearTimeout(this._scrubUnlockTimer);
+      this._scrubUnlockTimer = null;
+    }
+    this._isScrubbing = false;
+    this._isResuming = false;
+  }
+
+  async saveReadingProgress(immediate = false) {
+    if (!this.currentStory) return;
+
+    if (!immediate) {
+      if (this._isResuming || this._isScrubbing) return;
+      clearTimeout(this._saveProgressTimer);
+      this._saveProgressTimer = setTimeout(() => {
+        this.saveReadingProgress(true);
+      }, 800);
+      return;
+    }
+
+    clearTimeout(this._saveProgressTimer);
+    this._saveProgressTimer = null;
+
+    const story = this.currentStory;
+    const total = story.imageCount || document.querySelectorAll('#reader-content .reader-page-wrap').length || 1;
+    const page = Math.max(1, Math.min(this._readerCurrentPage || 1, total));
+    const scrollHeight = document.body.scrollHeight - window.innerHeight;
+    const ratio = scrollHeight > 0 ? Math.max(0, Math.min(1, window.scrollY / scrollHeight)) : 0;
+
+    if (!story.lastReadPage && page <= 1 && ratio < 0.02) {
+      return;
+    }
+
+    if (story.lastReadPage === page && Math.abs((story.lastReadRatio || 0) - ratio) < 0.01) {
+      return;
+    }
+
+    story.lastReadPage = page;
+    story.lastReadRatio = Number(ratio.toFixed(4));
+    story.lastReadAt = Date.now();
+
+    try {
+      await this.db.addStory(story);
+    } catch (e) {
+      console.warn('Could not save reading progress:', e);
+    }
+  }
+
+  async getOrderedStoryIds() {
+    if (Array.isArray(this.currentStoryOrder) && this.currentStoryOrder.length > 0) {
+      if (!this.currentStory || this.currentStoryOrder.includes(this.currentStory.id)) {
+        return this.currentStoryOrder;
+      }
+    }
+    const allStories = await this.db.getAllStories();
+    allStories.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+    this.currentStoryOrder = allStories.map((s) => s.id);
+    return this.currentStoryOrder;
+  }
+
+  async updateAdjacentStoryButtons() {
+    const order = await this.getOrderedStoryIds();
+    const idx = this.currentStory ? order.indexOf(this.currentStory.id) : -1;
+    const hasPrev = idx > 0;
+    const hasNext = idx !== -1 && idx < order.length - 1;
+
+    ['reader-prev-story-btn', 'reader-end-prev-btn'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !hasPrev;
+    });
+    ['reader-next-story-btn', 'reader-end-next-btn'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !hasNext;
+    });
+  }
+
+  async openAdjacentStory(delta) {
+    const order = await this.getOrderedStoryIds();
+    const idx = this.currentStory ? order.indexOf(this.currentStory.id) : -1;
+    const targetIdx = idx + delta;
+    if (idx === -1 || targetIdx < 0 || targetIdx >= order.length) {
+      this.showToast(delta < 0 ? 'Đây là truyện đầu tiên!' : 'Đây là truyện cuối cùng!', 'info');
+      return;
+    }
+
+    await this.saveReadingProgress(true);
+    await this.openStory(order[targetIdx], { replaceHistory: true });
+  }
+
+  togglePageZoom(pageWrap, clientX) {
+    if (!pageWrap) return;
+    const isZoomed = pageWrap.classList.toggle('zoomed');
+    if (isZoomed) {
+      const rect = pageWrap.getBoundingClientRect();
+      const ratioX = rect.width > 0 ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) : 0.5;
+      requestAnimationFrame(() => {
+        const maxScrollLeft = pageWrap.scrollWidth - pageWrap.clientWidth;
+        if (maxScrollLeft > 0) {
+          pageWrap.scrollLeft = Math.round(maxScrollLeft * ratioX);
+        }
+      });
+    } else {
+      pageWrap.scrollLeft = 0;
+    }
+  }
+
+  waitForImagesSettled(imgEls, timeoutMs = 600) {
+    if (!imgEls || imgEls.length === 0) return Promise.resolve();
+    const tasks = imgEls.map(
+      (img) =>
+        new Promise((resolve) => {
+          const finish = () => {
+            img.parentElement?.classList.add('loaded');
+            if (typeof img.decode === 'function') {
+              img.decode().catch(() => {}).finally(resolve);
+            } else {
+              resolve();
+            }
+          };
+          if (img.complete) {
+            finish();
+          } else {
+            img.addEventListener('load', finish, { once: true });
+            img.addEventListener('error', finish, { once: true });
+          }
+        })
+    );
+    return Promise.race([
+      Promise.all(tasks),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  }
+
+  jumpToReaderPage(page) {
+    const content = document.getElementById('reader-content');
+    if (!content) return;
+    for (let p = Math.max(1, page - 1); p <= page + 1; p++) {
+      const nearImg = content.querySelector(`.reader-page-wrap[data-page="${p}"] img`);
+      if (nearImg && nearImg.loading === 'lazy') {
+        nearImg.loading = 'eager';
+      }
+    }
+    const wrap = content.querySelector(`.reader-page-wrap[data-page="${page}"]`);
+    if (wrap) {
+      wrap.scrollIntoView({ behavior: 'auto', block: 'start' });
+    }
+  }
+
+  updateReaderProgressBar() {
+    const progressBar = document.getElementById('reader-progress');
+    if (!progressBar) return;
+    const scrollTop = window.scrollY;
+    const scrollHeight = document.body.scrollHeight - window.innerHeight;
+    const progress = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
+    progressBar.style.width = `${Math.max(0, Math.min(progress, 100))}%`;
+  }
+
+  async openStory(storyId, options = {}) {
     const story = await this.db.getStory(storyId);
     if (!story) return;
 
@@ -916,93 +1235,183 @@ class KhoTruyen {
       return;
     }
 
-    // Remember library scroll position and current story ID before reading
-    this.lastLibraryScrollY = window.scrollY;
+    const sessionId = ++this._readerSessionId;
+    this._isExitingReader = false;
+    this._allowPopstateExit = false;
+
+    // Remember library scroll position (only when entering from library) and current story ID
+    const readerScreen = document.getElementById('screen-reader');
+    if (!readerScreen?.classList.contains('active')) {
+      this.lastLibraryScrollY = window.scrollY;
+    }
     this.lastViewedStoryId = storyId;
 
-    // Push history state so mobile back gesture/button returns to library naturally
-    if (!history.state || history.state.screen !== 'reader') {
+    // Push or replace history state so mobile back gesture/button returns to library naturally
+    if (options.replaceHistory || history.state?.screen === 'reader') {
+      history.replaceState({ screen: 'reader', storyId }, '');
+    } else {
       history.pushState({ screen: 'reader', storyId }, '');
     }
 
+    this.cleanupReaderTrackers();
     this.revokeManagedUrls();
     this.currentStory = story;
     this.readerUIVisible = true;
 
-    // Set header
+    const resumePage =
+      story.lastReadPage > 1 && story.lastReadPage <= images.length ? story.lastReadPage : 1;
+    this._readerCurrentPage = resumePage;
+    this._isResuming = resumePage > 1;
+
+    // Set header & scrubber
     document.getElementById('reader-title').textContent = story.name;
     document.getElementById('reader-total').textContent = images.length;
-    document.getElementById('reader-current').textContent = '1';
+    document.getElementById('reader-current').textContent = String(resumePage);
+    const scrubber = document.getElementById('reader-scrubber');
+    if (scrubber) {
+      scrubber.min = '1';
+      scrubber.max = String(images.length);
+      scrubber.value = String(resumePage);
+    }
 
-    // Render images with lazy loading, async decoding, and managed URLs
+    // Render images wrapped in .reader-page-wrap + end navigation
     const content = document.getElementById('reader-content');
-    content.innerHTML = images
-      .map(
-        (img, idx) => `
-      <img src="${this.createManagedUrl(img.data)}" alt="Trang ${idx + 1}" data-page="${idx + 1}" loading="lazy" decoding="async">
-    `
-      )
+    const pagesHtml = images
+      .map((img, idx) => {
+        const pageNum = idx + 1;
+        const loadingMode = pageNum >= resumePage - 2 && pageNum <= resumePage + 2 ? 'eager' : 'lazy';
+        return `
+      <div class="reader-page-wrap" data-page="${pageNum}">
+        <img src="${this.createManagedUrl(img.data)}" alt="Trang ${pageNum}" data-page="${pageNum}" loading="${loadingMode}" decoding="async" onload="this.parentElement?.classList.add('loaded')" onerror="this.parentElement?.classList.add('loaded')">
+      </div>
+    `;
+      })
       .join('');
 
-    // Show reader
+    const endNavHtml = `
+      <div class="reader-end-nav" id="reader-end-nav">
+        <div class="reader-end-title">Hết truyện "${this.escapeHTML(story.name)}"</div>
+        <div class="reader-end-actions">
+          <button type="button" class="btn btn-secondary" id="reader-end-prev-btn" onclick="app.openAdjacentStory(-1)">⏮ Truyện trước</button>
+          <button type="button" class="btn btn-primary" id="reader-end-next-btn" onclick="app.openAdjacentStory(1)">Truyện tiếp theo ⏭</button>
+          <button type="button" class="btn btn-secondary" onclick="app.exitReader()">📚 Về thư viện</button>
+        </div>
+      </div>
+    `;
+
+    content.innerHTML = pagesHtml + endNavHtml;
+    content.querySelectorAll('.reader-page-wrap img').forEach((imgEl) => {
+      if (imgEl.complete) {
+        imgEl.parentElement?.classList.add('loaded');
+      }
+    });
+
+    // Apply saved reader settings & show reader
+    this.applyReaderSettings();
     this.showScreen('reader');
 
-    // Update reader header/footer visibility
+    // Update reader header/footer visibility & reset settings panel
     document.getElementById('reader-header').classList.remove('hidden');
     document.getElementById('reader-footer').classList.remove('hidden');
+    this.toggleReaderSettings(false);
 
-    // Setup scroll tracking
+    // Setup scroll tracking, adjacent buttons & wake lock
     this.setupReaderScroll(images.length);
+    this.updateAdjacentStoryButtons();
+    this.requestWakeLock();
+
+    // Resume exact reading position if previously read past page 1
+    if (resumePage > 1) {
+      this.showToast(`Tiếp tục từ trang ${resumePage} / ${images.length}`, 'info');
+      const target = content.querySelector(`.reader-page-wrap[data-page="${resumePage}"]`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+
+      const eagerImgs = [];
+      for (let p = Math.max(1, resumePage - 2); p <= Math.min(images.length, resumePage + 2); p++) {
+        const imgEl = content.querySelector(`.reader-page-wrap[data-page="${p}"] img`);
+        if (imgEl) eagerImgs.push(imgEl);
+      }
+
+      await this.waitForImagesSettled(eagerImgs, 600);
+      if (this._readerSessionId !== sessionId) return;
+
+      if (target) {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (this._readerSessionId !== sessionId) return;
+
+      if (target) {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+      this._isResuming = false;
+      this.updateReaderProgressBar();
+    }
   }
 
   setupReaderScroll(totalPages) {
+    const wasResuming = this._isResuming;
+    this.cleanupReaderTrackers();
+    this._isResuming = wasResuming;
+
     const content = document.getElementById('reader-content');
-    const progressBar = document.getElementById('reader-progress');
     const currentEl = document.getElementById('reader-current');
+    const scrubber = document.getElementById('reader-scrubber');
 
-    const updateProgress = () => {
-      const scrollTop = window.scrollY;
-      const scrollHeight = document.body.scrollHeight - window.innerHeight;
-      const progress = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
-      progressBar.style.width = `${Math.min(progress, 100)}%`;
+    if (scrubber) {
+      scrubber.min = '1';
+      scrubber.max = String(Math.max(1, totalPages));
+      scrubber.value = String(this._readerCurrentPage || 1);
+    }
 
-      // Calculate current page
-      const imgs = content.querySelectorAll('img');
-      let currentPage = 1;
-      const viewportCenter = scrollTop + window.innerHeight / 2;
+    if ('IntersectionObserver' in window) {
+      this._readerObserver = new IntersectionObserver(
+        (entries) => {
+          if (this._isScrubbing || this._isResuming) return;
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              const page = Number(entry.target.dataset.page);
+              if (page && page !== this._readerCurrentPage) {
+                this._readerCurrentPage = page;
+                if (currentEl) currentEl.textContent = String(page);
+                if (scrubber) scrubber.value = String(page);
+              }
+            }
+          }
+        },
+        { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
+      );
 
-      imgs.forEach((img, idx) => {
-        const rect = img.getBoundingClientRect();
-        const imgTop = rect.top + scrollTop;
-        const imgBottom = imgTop + rect.height;
-        if (viewportCenter >= imgTop && viewportCenter <= imgBottom) {
-          currentPage = idx + 1;
-        }
+      content.querySelectorAll('.reader-page-wrap').forEach((wrap) => {
+        this._readerObserver.observe(wrap);
       });
+    }
 
-      currentEl.textContent = currentPage;
-    };
-
-    // Throttled scroll handler
     let ticking = false;
     const scrollHandler = () => {
       if (!ticking) {
         requestAnimationFrame(() => {
-          updateProgress();
+          this.updateReaderProgressBar();
+          if (!this._isResuming && !this._isScrubbing) {
+            this.saveReadingProgress(false);
+          }
           ticking = false;
         });
         ticking = true;
       }
     };
 
-    window.addEventListener('scroll', scrollHandler);
-    
-    // Clean up on screen change
+    window.addEventListener('scroll', scrollHandler, { passive: true });
     this._readerScrollHandler = scrollHandler;
+    if (!this._isResuming) {
+      this.updateReaderProgressBar();
+    }
   }
 
-  toggleReaderUI() {
-    this.readerUIVisible = !this.readerUIVisible;
+  toggleReaderUI(forceVisible) {
+    this.readerUIVisible = typeof forceVisible === 'boolean' ? forceVisible : !this.readerUIVisible;
     const header = document.getElementById('reader-header');
     const footer = document.getElementById('reader-footer');
 
@@ -1012,42 +1421,60 @@ class KhoTruyen {
     } else {
       header.classList.add('hidden');
       footer.classList.add('hidden');
+      this.toggleReaderSettings(false);
     }
   }
 
   async exitReader(triggerHistoryBack = true) {
-    if (triggerHistoryBack && history.state && history.state.screen === 'reader') {
-      history.back();
-      return;
-    }
+    if (this._isExitingReader && !this._allowPopstateExit) return;
+    this._isExitingReader = true;
+    this._allowPopstateExit = false;
 
-    if (this._readerScrollHandler) {
-      window.removeEventListener('scroll', this._readerScrollHandler);
-      this._readerScrollHandler = null;
-    }
-    this.revokeManagedUrls();
-    const content = document.getElementById('reader-content');
-    if (content) content.innerHTML = '';
+    try {
+      await this.saveReadingProgress(true);
 
-    // Return to library while preserving scroll
-    this.showScreen('library', true);
-    await this.loadLibrary();
+      if (triggerHistoryBack && history.state && history.state.screen === 'reader') {
+        this._allowPopstateExit = true;
+        history.back();
+        return;
+      }
 
-    if (this.lastViewedStoryId) {
-      const targetId = this.lastViewedStoryId;
-      setTimeout(() => {
-        const card = document.querySelector(`.story-card[data-id="${targetId}"]`);
-        if (card) {
-          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          card.classList.add('story-card-highlight');
-          setTimeout(() => card.classList.remove('story-card-highlight'), 1800);
-        } else if (this.lastLibraryScrollY != null) {
-          window.scrollTo({ top: this.lastLibraryScrollY, behavior: 'smooth' });
-        }
-      }, 80);
-      this.lastViewedStoryId = null;
-    } else if (this.lastLibraryScrollY != null) {
-      window.scrollTo(0, this.lastLibraryScrollY);
+      this._readerSessionId++;
+      this.cleanupReaderTrackers();
+      clearTimeout(this._singleTapTimer);
+      this._singleTapTimer = null;
+      this.toggleReaderSettings(false);
+      this.releaseWakeLock();
+      this.revokeManagedUrls();
+      this.currentStory = null;
+
+      const content = document.getElementById('reader-content');
+      if (content) content.innerHTML = '';
+
+      // Return to library while preserving scroll
+      this.showScreen('library', true);
+      await this.loadLibrary();
+
+      if (this.lastViewedStoryId) {
+        const targetId = this.lastViewedStoryId;
+        setTimeout(() => {
+          const card = document.querySelector(`.story-card[data-id="${targetId}"]`);
+          if (card) {
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            card.classList.add('story-card-highlight');
+            setTimeout(() => card.classList.remove('story-card-highlight'), 1800);
+          } else if (this.lastLibraryScrollY != null) {
+            window.scrollTo({ top: this.lastLibraryScrollY, behavior: 'smooth' });
+          }
+        }, 80);
+        this.lastViewedStoryId = null;
+      } else if (this.lastLibraryScrollY != null) {
+        window.scrollTo(0, this.lastLibraryScrollY);
+      }
+    } finally {
+      if (!this._allowPopstateExit) {
+        this._isExitingReader = false;
+      }
     }
   }
 
@@ -1477,6 +1904,18 @@ class KhoTruyen {
           if (!window.google?.accounts?.oauth2) {
             return reject(new Error('Không tìm thấy thư viện Google Identity Services.'));
           }
+          let settled = false;
+          const finishResolve = (val) => {
+            if (settled) return;
+            settled = true;
+            resolve(val);
+          };
+          const finishReject = (err) => {
+            if (settled) return;
+            settled = true;
+            reject(err);
+          };
+
           const tokenClient = window.google.accounts.oauth2.initTokenClient({
             client_id: clientId,
             scope: 'https://www.googleapis.com/auth/drive.file',
@@ -1486,11 +1925,21 @@ class KhoTruyen {
                 const expiresIn = Number(tokenResponse.expires_in) || 3600;
                 this.gdriveTokenExpiresAt = Date.now() + expiresIn * 1000;
                 this.updateGDriveBadge(true);
-                resolve(tokenResponse.access_token);
+                finishResolve(tokenResponse.access_token);
               } else if (tokenResponse && tokenResponse.error) {
-                reject(new Error('Lỗi xác thực Google: ' + (tokenResponse.error_description || tokenResponse.error)));
+                finishReject(new Error('Lỗi xác thực Google: ' + (tokenResponse.error_description || tokenResponse.error)));
               } else {
-                reject(new Error('Đăng nhập Google bị hủy hoặc thất bại!'));
+                finishReject(new Error('Đăng nhập Google bị hủy hoặc thất bại!'));
+              }
+            },
+            error_callback: (err) => {
+              const type = err?.type || '';
+              if (type === 'popup_closed') {
+                finishReject(new Error('Bạn đã đóng cửa sổ đăng nhập Google.'));
+              } else if (type === 'popup_failed_to_open') {
+                finishReject(new Error('Trình duyệt đã chặn popup đăng nhập Google. Vui lòng cho phép popup và thử lại!'));
+              } else {
+                finishReject(new Error('Lỗi xác thực Google: ' + (err?.message || type || 'Không xác định')));
               }
             },
           });
@@ -2011,10 +2460,10 @@ class KhoTruyen {
           return `
             <div class="gdrive-file-item">
               <div class="gdrive-file-info">
-                <div class="gdrive-file-name">📄 ${this.escapeHtml(f.name)}</div>
+                <div class="gdrive-file-name">📄 ${this.escapeHTML(f.name)}</div>
                 <div class="gdrive-file-meta">Dung lượng: ${sizeMB} • Cập nhật: ${dateStr}</div>
               </div>
-              <button class="btn btn-sm btn-primary" onclick="app.downloadAndRestoreGDrive('${f.id}', '${this.escapeHtml(f.name).replace(/'/g, "\\'")}')">
+              <button class="btn btn-sm btn-primary" onclick="app.downloadAndRestoreGDrive('${f.id}', '${this.escapeHTML(f.name).replace(/'/g, "\\'")}')">
                 Nạp bản này
               </button>
             </div>
@@ -3097,10 +3546,79 @@ class KhoTruyen {
       this.handleFileSelect(e.dataTransfer.files);
     });
 
-    // Reader tap to toggle UI
-    document.getElementById('reader-content').addEventListener('click', () => {
-      this.toggleReaderUI();
+    // Reader tap to toggle UI / double-tap to zoom 2x
+    document.getElementById('reader-content')?.addEventListener('click', (e) => {
+      if (e.target.closest('.reader-end-nav') || e.target.closest('button')) return;
+
+      const now = Date.now();
+      const pageWrap = e.target.closest('.reader-page-wrap');
+      const dx = e.clientX - (this._lastTapX || 0);
+      const dy = e.clientY - (this._lastTapY || 0);
+      const isDoubleTap = pageWrap && now - (this._lastTapTime || 0) < 260 && Math.hypot(dx, dy) < 35;
+
+      if (isDoubleTap) {
+        clearTimeout(this._singleTapTimer);
+        this._singleTapTimer = null;
+        this._lastTapTime = 0;
+        this.togglePageZoom(pageWrap, e.clientX);
+        return;
+      }
+
+      this._lastTapTime = now;
+      this._lastTapX = e.clientX;
+      this._lastTapY = e.clientY;
+      clearTimeout(this._singleTapTimer);
+      this._singleTapTimer = setTimeout(() => {
+        this._singleTapTimer = null;
+        this.toggleReaderUI();
+      }, 260);
     });
+
+    // Reader page scrubber
+    const readerScrubber = document.getElementById('reader-scrubber');
+    if (readerScrubber) {
+      const startScrub = () => {
+        clearTimeout(this._scrubUnlockTimer);
+        this._isScrubbing = true;
+      };
+      const scheduleUnlockScrub = (targetPage) => {
+        clearTimeout(this._scrubUnlockTimer);
+        this._scrubUnlockTimer = setTimeout(() => {
+          if (targetPage) {
+            this.jumpToReaderPage(targetPage);
+          }
+          this._isScrubbing = false;
+          this.updateReaderProgressBar();
+          this.saveReadingProgress(false);
+        }, 250);
+      };
+      readerScrubber.addEventListener('pointerdown', startScrub);
+      readerScrubber.addEventListener('touchstart', startScrub, { passive: true });
+      readerScrubber.addEventListener('mousedown', startScrub);
+      readerScrubber.addEventListener('pointerup', () => scheduleUnlockScrub(Number(readerScrubber.value) || 1));
+      readerScrubber.addEventListener('pointercancel', () => scheduleUnlockScrub(Number(readerScrubber.value) || 1));
+      readerScrubber.addEventListener('touchend', () => scheduleUnlockScrub(Number(readerScrubber.value) || 1));
+      readerScrubber.addEventListener('mouseup', () => scheduleUnlockScrub(Number(readerScrubber.value) || 1));
+
+      readerScrubber.addEventListener('input', (e) => {
+        clearTimeout(this._scrubUnlockTimer);
+        this._isScrubbing = true;
+        const page = Number(e.target.value) || 1;
+        this._readerCurrentPage = page;
+        const currentEl = document.getElementById('reader-current');
+        if (currentEl) currentEl.textContent = String(page);
+        this.jumpToReaderPage(page);
+      });
+
+      readerScrubber.addEventListener('change', (e) => {
+        const page = Number(e.target.value) || 1;
+        this._readerCurrentPage = page;
+        const currentEl = document.getElementById('reader-current');
+        if (currentEl) currentEl.textContent = String(page);
+        this.jumpToReaderPage(page);
+        scheduleUnlockScrub(page);
+      });
+    }
 
     // Modal overlay click to close
     document.getElementById('modal-overlay')?.addEventListener('click', (e) => {
@@ -3175,6 +3693,16 @@ class KhoTruyen {
         this.closeHitomiModal();
       }
     });
+    // Save reading progress & re-acquire wake lock on visibility change
+    document.addEventListener('visibilitychange', () => {
+      const readerScreen = document.getElementById('screen-reader');
+      if (!readerScreen || !readerScreen.classList.contains('active')) return;
+      if (document.visibilityState === 'hidden') {
+        this.saveReadingProgress(true);
+      } else if (document.visibilityState === 'visible') {
+        this.requestWakeLock();
+      }
+    });
   }
 
   // ==================== UTILS ====================
@@ -3184,8 +3712,8 @@ class KhoTruyen {
 
   escapeHTML(str) {
     const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    div.textContent = str ?? '';
+    return div.innerHTML.replace(/"/g, '&quot;');
   }
 }
 

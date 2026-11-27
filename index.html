@@ -2,14 +2,14 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0a0a0f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="Kho Truyện - Ứng dụng đọc truyện tranh dọc offline. Tạo kho truyện riêng của bạn!">
   <title>Kho Truyện</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=14">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
 </head>
 <body>
@@ -120,7 +120,7 @@
     <!-- ==================== CREATE / EDIT SCREEN ==================== -->
     <div id="screen-create" class="screen">
       <div class="header">
-        <button class="header-back" onclick="app.showScreen('library'); app.loadLibrary();" aria-label="Quay lại">
+        <button class="header-back" onclick="app.exitCreate()" aria-label="Quay lại">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="15 18 9 12 15 6"></polyline>
           </svg>
@@ -213,6 +213,55 @@
           </svg>
         </button>
         <span class="header-title" id="reader-title">Tên truyện</span>
+        <button class="reader-icon-btn" id="reader-settings-btn" onclick="app.toggleReaderSettings()" aria-label="Cài đặt đọc" title="Cài đặt đọc">⚙️</button>
+      </div>
+
+      <div class="reader-settings-panel" id="reader-settings-panel">
+        <div class="reader-settings-row">
+          <div class="reader-settings-label">Bề rộng khung đọc</div>
+          <div class="reader-chip-group">
+            <button type="button" class="reader-chip" data-reader-width="100%" onclick="app.setReaderSetting('width', '100%')">100%</button>
+            <button type="button" class="reader-chip" data-reader-width="700px" onclick="app.setReaderSetting('width', '700px')">700px</button>
+            <button type="button" class="reader-chip" data-reader-width="900px" onclick="app.setReaderSetting('width', '900px')">900px</button>
+            <button type="button" class="reader-chip" data-reader-width="1100px" onclick="app.setReaderSetting('width', '1100px')">1100px</button>
+          </div>
+        </div>
+
+        <div class="reader-settings-row">
+          <div class="reader-settings-label">Khoảng cách trang</div>
+          <div class="reader-chip-group">
+            <button type="button" class="reader-chip" data-reader-gap="0" onclick="app.setReaderSetting('gap', 0)">Liền mạch (0px)</button>
+            <button type="button" class="reader-chip" data-reader-gap="8" onclick="app.setReaderSetting('gap', 8)">8px</button>
+            <button type="button" class="reader-chip" data-reader-gap="16" onclick="app.setReaderSetting('gap', 16)">16px</button>
+          </div>
+        </div>
+
+        <div class="reader-settings-row">
+          <div class="reader-settings-label-row">
+            <label class="reader-settings-label" for="reader-brightness-slider">Độ sáng</label>
+            <span class="reader-settings-value" id="reader-brightness-val">100%</span>
+          </div>
+          <input type="range" class="reader-range-slider" id="reader-brightness-slider" min="40" max="100" value="100" oninput="app.setReaderSetting('brightness', Number(this.value))">
+        </div>
+
+        <div class="reader-settings-row">
+          <div class="reader-settings-label-row">
+            <label class="reader-settings-label" for="reader-warmth-slider">Lọc ánh sáng vàng</label>
+            <span class="reader-settings-value" id="reader-warmth-val">0%</span>
+          </div>
+          <input type="range" class="reader-range-slider" id="reader-warmth-slider" min="0" max="50" value="0" oninput="app.setReaderSetting('warmth', Number(this.value))">
+        </div>
+
+        <div class="reader-settings-toggle-row">
+          <div>
+            <div class="reader-settings-label">Giữ màn hình luôn sáng</div>
+            <div class="reader-settings-sub">Ngăn tự tắt màn hình khi đọc</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="reader-wakelock-toggle" checked onchange="app.setReaderSetting('wakeLock', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
 
       <div class="reader-content" id="reader-content">
@@ -220,8 +269,14 @@
       </div>
 
       <div class="reader-footer" id="reader-footer">
+        <div class="reader-scrubber-row">
+          <button class="reader-nav-btn" id="reader-prev-story-btn" onclick="app.openAdjacentStory(-1)" title="Truyện trước" aria-label="Truyện trước">⏮</button>
+          <input type="range" class="reader-scrubber" id="reader-scrubber" min="1" max="1" value="1" aria-label="Nhảy đến trang">
+          <button class="reader-nav-btn" id="reader-next-story-btn" onclick="app.openAdjacentStory(1)" title="Truyện tiếp theo" aria-label="Truyện tiếp theo">⏭</button>
+        </div>
         <div class="reader-page-info">
-          Trang <span id="reader-current">1</span> / <span id="reader-total">1</span>
+          <span>Trang <span id="reader-current">1</span> / <span id="reader-total">1</span></span>
+          <span class="reader-zoom-hint">• Nhấn đúp để zoom 2x</span>
         </div>
       </div>
     </div>
@@ -791,6 +846,6 @@
     }
   </script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="./app.js?v=13"></script>
+  <script src="./app.js?v=14"></script>
 </body>
 </html>
