@@ -9,7 +9,7 @@
   <meta name="description" content="Kho Truyện - Ứng dụng đọc truyện tranh dọc offline. Tạo kho truyện riêng của bạn!">
   <title>Kho Truyện</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=14">
+  <link rel="stylesheet" href="./styles.css?v=15">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
 </head>
 <body>
@@ -62,6 +62,21 @@
         <div class="category-scroll" id="category-pills">
           <!-- Dynamically generated category chips -->
         </div>
+      </div>
+
+      <!-- Library Filter & Sort Bar -->
+      <div class="library-filter-bar" id="library-filter-bar">
+        <div class="filter-pills">
+          <button type="button" class="filter-pill active" data-read-filter="all" onclick="app.setReadFilter('all')">Tất cả</button>
+          <button type="button" class="filter-pill" data-read-filter="reading" onclick="app.setReadFilter('reading')">Đang đọc</button>
+          <button type="button" class="filter-pill" data-read-filter="unread" onclick="app.setReadFilter('unread')">Chưa đọc</button>
+          <button type="button" class="filter-pill" data-read-filter="done" onclick="app.setReadFilter('done')">Đã đọc</button>
+        </div>
+        <select id="library-sort-select" class="library-sort-select" onchange="app.setLibrarySort(this.value)" aria-label="Sắp xếp truyện">
+          <option value="updated">Mới cập nhật</option>
+          <option value="recent-read">Mới đọc gần đây</option>
+          <option value="name">Tên A → Z</option>
+        </select>
       </div>
 
       <!-- Active Category Header & Actions -->
@@ -213,10 +228,20 @@
           </svg>
         </button>
         <span class="header-title" id="reader-title">Tên truyện</span>
+        <button class="reader-icon-btn" id="reader-bookmark-btn" onclick="app.togglePageBookmark()" aria-label="Đánh dấu trang" title="Đánh dấu trang">☆</button>
         <button class="reader-icon-btn" id="reader-settings-btn" onclick="app.toggleReaderSettings()" aria-label="Cài đặt đọc" title="Cài đặt đọc">⚙️</button>
       </div>
 
       <div class="reader-settings-panel" id="reader-settings-panel">
+        <div class="reader-settings-row">
+          <div class="reader-settings-label">Chế độ đọc</div>
+          <div class="reader-chip-group">
+            <button type="button" class="reader-chip" data-reader-mode="vertical" onclick="app.setReaderSetting('mode', 'vertical')">Cuộn dọc</button>
+            <button type="button" class="reader-chip" data-reader-mode="single-rtl" onclick="app.setReaderSetting('mode', 'single-rtl')">Manga (Phải→Trái)</button>
+            <button type="button" class="reader-chip" data-reader-mode="single-ltr" onclick="app.setReaderSetting('mode', 'single-ltr')">Comic (Trái→Phải)</button>
+          </div>
+        </div>
+
         <div class="reader-settings-row">
           <div class="reader-settings-label">Bề rộng khung đọc</div>
           <div class="reader-chip-group">
@@ -261,6 +286,22 @@
             <input type="checkbox" id="reader-wakelock-toggle" checked onchange="app.setReaderSetting('wakeLock', this.checked)">
             <span class="toggle-slider"></span>
           </label>
+        </div>
+
+        <div class="reader-settings-toggle-row">
+          <div>
+            <div class="reader-settings-label">Vùng chạm 1 tay (Tap Zones)</div>
+            <div class="reader-settings-sub">Chạm mép trái/phải lật trang hoặc cuộn, chạm giữa bật/tắt menu</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="reader-tapzones-toggle" checked onchange="app.setReaderSetting('tapZones', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="reader-settings-row reader-bookmarks-section">
+          <div class="reader-settings-label">Trang đã đánh dấu</div>
+          <div class="reader-bookmarks-list" id="reader-bookmarks-list"></div>
         </div>
       </div>
 
@@ -773,6 +814,11 @@
               <!-- Gallery items with checkboxes -->
             </div>
 
+            <button type="button" class="btn btn-secondary hitomi-load-more-btn" id="hitomi-load-more-btn" style="display: none; width: 100%; margin-top: 10px; font-size: 0.82rem; padding: 10px;" onclick="app.loadMoreHitomiGalleries()">
+              <span class="spinner" id="hitomi-load-more-spinner" style="display: none; width: 14px; height: 14px; border-width: 2px;"></span>
+              <span id="hitomi-load-more-text">➕ Tải thêm danh sách</span>
+            </button>
+
             <button class="btn btn-primary" id="hitomi-start-btn" style="width: 100%; margin-top: 12px; font-size: 0.88rem; padding: 12px;" onclick="app.startHitomiDownload()">
               🚀 Bắt đầu tải về (<span id="hitomi-selected-count">0</span> bộ)
             </button>
@@ -846,6 +892,6 @@
     }
   </script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="./app.js?v=14"></script>
+  <script src="./app.js?v=15"></script>
 </body>
 </html>

@@ -453,6 +453,77 @@ body {
   color: #fff;
 }
 
+/* Library Filter & Sort Bar */
+.library-filter-bar {
+  padding: 0 20px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
+.filter-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-pill {
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.filter-pill:active {
+  transform: scale(0.96);
+}
+
+.filter-pill.active {
+  background: rgba(108, 92, 231, 0.22);
+  border-color: var(--border-active);
+  color: var(--accent-light);
+}
+
+.library-sort-select {
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: var(--transition-fast);
+}
+
+.library-sort-select:focus {
+  border-color: var(--border-active);
+}
+
 /* Active Category Bar */
 .active-category-bar {
   margin: 0 20px 16px;
@@ -639,6 +710,19 @@ body {
   background: var(--success-bg);
   color: var(--success);
   border: 1px solid rgba(81, 207, 102, 0.25);
+}
+
+.story-bookmark-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 7px;
+  background: rgba(255, 212, 59, 0.14);
+  border: 1px solid rgba(255, 212, 59, 0.32);
+  border-radius: 10px;
+  color: #ffd43b;
+  font-size: 0.7rem;
+  font-weight: 700;
 }
 
 /* Empty State */
@@ -1185,12 +1269,22 @@ body {
   background: rgba(108, 92, 231, 0.45);
 }
 
+.reader-icon-btn.bookmarked {
+  color: #ffd43b;
+  border-color: rgba(255, 212, 59, 0.45);
+  background: rgba(255, 212, 59, 0.16);
+}
+
 .reader-settings-panel {
   position: fixed;
   top: calc(max(16px, env(safe-area-inset-top)) + 48px);
   right: 16px;
   left: 16px;
   max-width: 360px;
+  max-height: calc(100dvh - 110px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   margin-left: auto;
   z-index: 150;
   background: rgba(18, 18, 26, 0.94);
@@ -1291,6 +1385,43 @@ body {
   cursor: pointer;
 }
 
+.reader-bookmarks-section {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.reader-bookmarks-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 110px;
+  overflow-y: auto;
+}
+
+.reader-bookmark-chip {
+  padding: 5px 10px;
+  background: rgba(255, 212, 59, 0.12);
+  border: 1px solid rgba(255, 212, 59, 0.35);
+  border-radius: var(--radius-sm);
+  color: #ffd43b;
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.reader-bookmark-chip:active {
+  transform: scale(0.95);
+  background: rgba(255, 212, 59, 0.24);
+}
+
+.reader-bookmarks-empty {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .reader-content {
   width: 100%;
   display: flex;
@@ -1337,6 +1468,52 @@ body {
 .reader-page-wrap.zoomed img {
   width: 200%;
   max-width: none;
+}
+
+/* Single-Page Reading Mode (RTL Manga / LTR Comic) */
+.reader-screen.reader-mode-single .reader-content {
+  min-height: 100dvh;
+  justify-content: center;
+  gap: 0;
+}
+
+.reader-screen.reader-mode-single .reader-page-wrap {
+  display: none;
+}
+
+.reader-screen.reader-mode-single .reader-page-wrap.active-single-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100dvh;
+}
+
+.reader-screen.reader-mode-single .reader-page-wrap.active-single-page img {
+  max-height: 100dvh;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.reader-screen.reader-mode-single .reader-page-wrap.active-single-page.zoomed {
+  display: block;
+  overflow: auto;
+  max-height: 100dvh;
+}
+
+.reader-screen.reader-mode-single .reader-page-wrap.active-single-page.zoomed img {
+  width: 200%;
+  max-width: none;
+  max-height: none;
+}
+
+.reader-screen.reader-mode-single .reader-end-nav {
+  display: none;
+}
+
+.reader-screen.reader-mode-single .reader-end-nav.show-in-single {
+  display: flex;
+  margin-top: 0;
 }
 
 .reader-end-nav {
@@ -2236,6 +2413,7 @@ body {
   .library-hero,
   .search-container,
   .category-container,
+  .library-filter-bar,
   .active-category-bar {
     max-width: 700px;
     margin-left: auto;
@@ -2430,6 +2608,18 @@ img {
 
 .hitomi-gallery-item.is-duplicate:hover {
   opacity: 1;
+}
+
+.hitomi-load-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.hitomi-load-more-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 /* Floating Background Download Widget */

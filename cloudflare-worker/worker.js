@@ -70,7 +70,15 @@ async function handleParse(url) {
     targetUrl.match(/\/reader\/(\d+)\.html/) ||
     targetUrl.match(/-(?!english|all|japanese|korean|chinese|spanish|thai|vietnamese)(\d+)\.html/);
 
-  if (singleIdMatch && !targetUrl.includes('/artist/') && !targetUrl.includes('/search.html')) {
+  if (
+    singleIdMatch &&
+    !targetUrl.includes('/artist/') &&
+    !targetUrl.includes('/group/') &&
+    !targetUrl.includes('/character/') &&
+    !targetUrl.includes('/series/') &&
+    !targetUrl.includes('/tag/') &&
+    !targetUrl.includes('/search.html')
+  ) {
     const galleryId = singleIdMatch[1];
     const info = await fetchGalleryInfo(galleryId);
     return jsonResponse({
@@ -86,46 +94,54 @@ async function handleParse(url) {
     });
   }
 
-  // 2. Resolve search / artist query into Nozomi binary index
-  const nozomiInfo = resolveNozomiQuery(targetUrl);
-  if (nozomiInfo) {
-    const { nozomiUrls, title, subtitle } = nozomiInfo;
-    let galleryIds = [];
+  // 2. Resolve search / artist / multi-tag query into Nozomi binary index filters
+  const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
+  const limit = Math.min(30, Math.max(1, parseInt(url.searchParams.get('limit') || '30', 10) || 30));
 
-    // Try nozomi URLs in sequence
-    for (const nUrl of nozomiUrls) {
-      try {
-        const res = await fetch(nUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://hitomi.la/',
-          }
-        });
-        if (res.ok) {
-          const buf = await res.arrayBuffer();
-          galleryIds = parseNozomiBuffer(buf);
-          if (galleryIds.length > 0) break;
+  const nozomiInfo = resolveNozomiQuery(targetUrl);
+  if (nozomiInfo && nozomiInfo.filters.length > 0) {
+    const { filters, excludeFilters, title, subtitle } = nozomiInfo;
+
+    const positiveLists = await Promise.all(
+      filters.map((f) => fetchNozomiIds(f.nozomiUrls))
+    );
+
+    let galleryIds = positiveLists[0] || [];
+    for (let i = 1; i < positiveLists.length && galleryIds.length > 0; i++) {
+      const allowedSet = new Set(positiveLists[i]);
+      galleryIds = galleryIds.filter((id) => allowedSet.has(id));
+    }
+
+    if (galleryIds.length > 0 && excludeFilters.length > 0) {
+      const excludeLists = await Promise.all(
+        excludeFilters.map((f) => fetchNozomiIds(f.nozomiUrls))
+      );
+      const excludeSet = new Set();
+      for (const list of excludeLists) {
+        for (const id of list) {
+          excludeSet.add(id);
         }
-      } catch (e) {
-        console.warn('Failed fetching nozomi:', nUrl, e.message);
+      }
+      if (excludeSet.size > 0) {
+        galleryIds = galleryIds.filter((id) => !excludeSet.has(id));
       }
     }
 
-    if (galleryIds.length > 0) {
-      // Limit to top 30 galleries per batch to stay within Cloudflare Worker subrequest limits
-      const topIds = galleryIds.slice(0, 30);
-      const galleries = await fetchGalleriesMetadata(topIds);
+    const pageIds = galleryIds.slice(offset, offset + limit);
+    const galleries = pageIds.length > 0 ? await fetchGalleriesMetadata(pageIds) : [];
 
-      return jsonResponse({
-        type: 'collection',
-        sourceUrl: targetUrl,
-        pageTitle: title,
-        subtitle: `${subtitle} (Tìm thấy ${galleryIds.length} bộ, hiển thị ${galleries.length} bộ)`,
-        totalFound: galleryIds.length,
-        count: galleries.length,
-        galleries,
-      });
-    }
+    return jsonResponse({
+      type: 'collection',
+      sourceUrl: targetUrl,
+      pageTitle: title,
+      subtitle: `${subtitle} (Tìm thấy ${galleryIds.length} bộ)`,
+      totalFound: galleryIds.length,
+      offset,
+      limit,
+      hasMore: offset + pageIds.length < galleryIds.length,
+      count: galleries.length,
+      galleries,
+    });
   }
 
   // 3. Fallback: Fetch as raw HTML and parse links
@@ -186,9 +202,45 @@ async function handleParse(url) {
     type: 'collection',
     sourceUrl: fetchUrl,
     pageTitle,
+    totalFound: galleries.length,
+    offset: 0,
+    limit: galleries.length,
+    hasMore: false,
     count: galleries.length,
     galleries,
   });
+}
+
+function safeDecodeURIComponent(str) {
+  try {
+    return decodeURIComponent(str);
+  } catch {
+    return str;
+  }
+}
+
+/**
+ * Fetches gallery IDs from the first valid .nozomi URL variant
+ */
+async function fetchNozomiIds(nozomiUrls) {
+  for (const nUrl of nozomiUrls) {
+    try {
+      const res = await fetch(nUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://hitomi.la/',
+        }
+      });
+      if (res.ok) {
+        const buf = await res.arrayBuffer();
+        const ids = parseNozomiBuffer(buf);
+        if (ids.length > 0) return ids;
+      }
+    } catch (e) {
+      console.warn('Failed fetching nozomi:', nUrl, e.message);
+    }
+  }
+  return [];
 }
 
 /**
@@ -197,7 +249,7 @@ async function handleParse(url) {
  * but users and query links often format them with underscores (_) or pluses (+).
  */
 function getNozomiVariants(type, rawName, lang = 'all') {
-  const decoded = decodeURIComponent(rawName).trim().toLowerCase();
+  const decoded = safeDecodeURIComponent(rawName).trim().toLowerCase();
   const withSpaces = encodeURIComponent(decoded.replace(/[_\+]+/g, ' ').replace(/\s+/g, ' ').trim());
   const withUnderscores = encodeURIComponent(decoded.replace(/[\s\+]+/g, '_').trim());
   const exact = encodeURIComponent(decoded);
@@ -221,155 +273,143 @@ function getNozomiVariants(type, rawName, lang = 'all') {
   return urls;
 }
 
+const SINGLE_PAGE_ROUTES = [
+  { regex: /\/artist\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i, type: 'artist', label: 'Tác giả' },
+  { regex: /\/group\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i, type: 'group', label: 'Nhóm' },
+  { regex: /\/character\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i, type: 'character', label: 'Nhân vật' },
+  { regex: /\/series\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i, type: 'series', label: 'Bộ truyện' },
+  { regex: /\/tag\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i, type: 'tag', label: 'Thẻ' },
+];
+
 /**
- * Resolves Hitomi URL or query into corresponding .nozomi binary index URLs
+ * Resolves Hitomi URL or query into positive/exclude .nozomi filter lists
  */
 function resolveNozomiQuery(inputUrl) {
-  let decoded = decodeURIComponent(inputUrl).trim();
+  const decoded = safeDecodeURIComponent(inputUrl).trim();
 
-  // Normalize: artist page URL like https://hitomi.la/artist/dokuneko%20noil-english.html
-  const artistUrlMatch = decoded.match(/\/artist\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
-  if (artistUrlMatch) {
-    const artist = artistUrlMatch[1];
-    const lang = (artistUrlMatch[2] || 'all').toLowerCase();
-    const displayName = artist.replace(/[_\+]+/g, ' ');
-    return {
-      title: `Tác giả: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('artist', artist, lang)
-    };
+  // 1. Single-page collection URLs (/artist/, /group/, /character/, /series/, /tag/)
+  for (const route of SINGLE_PAGE_ROUTES) {
+    const match = decoded.match(route.regex);
+    if (match) {
+      const rawName = match[1];
+      const lang = (match[2] || 'all').toLowerCase();
+      const displayName = rawName.replace(/[_\+]+/g, ' ');
+      return {
+        title: `${route.label}: ${displayName}`,
+        subtitle: `Ngôn ngữ: ${lang}`,
+        filters: [{
+          type: route.type,
+          name: displayName,
+          nozomiUrls: getNozomiVariants(route.type, rawName, lang),
+        }],
+        excludeFilters: [],
+      };
+    }
   }
 
-  // Group page URL like https://hitomi.la/group/name-english.html
-  const groupUrlMatch = decoded.match(/\/group\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
-  if (groupUrlMatch) {
-    const group = groupUrlMatch[1];
-    const lang = (groupUrlMatch[2] || 'all').toLowerCase();
-    const displayName = group.replace(/[_\+]+/g, ' ');
-    return {
-      title: `Nhóm: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('group', group, lang)
-    };
-  }
-
-  // Character page URL like https://hitomi.la/character/name-english.html
-  const charUrlMatch = decoded.match(/\/character\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
-  if (charUrlMatch) {
-    const charName = charUrlMatch[1];
-    const lang = (charUrlMatch[2] || 'all').toLowerCase();
-    const displayName = charName.replace(/[_\+]+/g, ' ');
-    return {
-      title: `Nhân vật: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('character', charName, lang)
-    };
-  }
-
-  // Series page URL like https://hitomi.la/series/name-english.html
-  const seriesUrlMatch = decoded.match(/\/series\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
-  if (seriesUrlMatch) {
-    const seriesName = seriesUrlMatch[1];
-    const lang = (seriesUrlMatch[2] || 'all').toLowerCase();
-    const displayName = seriesName.replace(/[_\+]+/g, ' ');
-    return {
-      title: `Bộ truyện: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('series', seriesName, lang)
-    };
-  }
-
-  // Tag page URL like https://hitomi.la/tag/female:name-english.html
-  const tagUrlMatch = decoded.match(/\/tag\/([^\/?#]+?)(?:-([a-z0-9]+))?\.html/i);
-  if (tagUrlMatch) {
-    const tag = tagUrlMatch[1];
-    const lang = (tagUrlMatch[2] || 'all').toLowerCase();
-    const displayName = tag.replace(/[_\+]+/g, ' ');
-    return {
-      title: `Thẻ: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('tag', tag, lang)
-    };
-  }
-
-  // Search query in URL e.g. search.html?artist%3Adokuneko_noil%20language%3Aenglish
+  // 2. Search query in URL (e.g. search.html?artist:foo%20female:bar%20-male:yaoi%20language:english)
   let queryString = decoded;
   if (queryString.includes('search.html?')) {
-    queryString = queryString.split('search.html?')[1];
+    queryString = queryString.split('search.html?')[1].split('#')[0];
+  } else if (queryString.includes('#')) {
+    queryString = queryString.split('#')[0];
   }
 
-  // Extract language filter
-  const langMatch = queryString.match(/language:([^\s&]+)/i);
-  const lang = (langMatch ? langMatch[1] : 'all').toLowerCase();
+  const tokens = queryString.split(/[\s&]+/).map((t) => t.trim()).filter(Boolean);
 
-  // Extract artist filter
-  const artistMatch = queryString.match(/artist:([^\s&]+)/i);
-  if (artistMatch) {
-    const artist = artistMatch[1];
-    const displayName = artist.replace(/[_\+]+/g, ' ');
+  // Pass 1: Extract language filter (default 'all')
+  let lang = 'all';
+  for (const token of tokens) {
+    const langMatch = token.match(/^language:([^\s&]+)$/i);
+    if (langMatch) {
+      lang = langMatch[1].toLowerCase();
+    }
+  }
+
+  // Pass 2: Extract positive and exclude (-) filters
+  const filters = [];
+  const excludeFilters = [];
+  let artistDisplayName = '';
+
+  const filterPattern = /^(-?)(artist|group|character|series|tag|female|male|type):(.+)$/i;
+  for (const token of tokens) {
+    const m = token.match(filterPattern);
+    if (!m) continue;
+
+    const isExclude = m[1] === '-';
+    const prefix = m[2].toLowerCase();
+    const rawValue = m[3];
+    if (!rawValue) continue;
+
+    let nozomiType = prefix;
+    let rawName = rawValue;
+    if (prefix === 'female' || prefix === 'male') {
+      nozomiType = 'tag';
+      rawName = `${prefix}:${rawValue}`;
+    }
+
+    const displayName = rawName.replace(/[_\+]+/g, ' ');
+    if (!isExclude && prefix === 'artist' && !artistDisplayName) {
+      artistDisplayName = displayName;
+    }
+
+    const filterObj = {
+      type: nozomiType,
+      prefix,
+      name: displayName,
+      nozomiUrls: getNozomiVariants(nozomiType, rawName, lang),
+    };
+
+    if (isExclude) {
+      excludeFilters.push(filterObj);
+    } else {
+      filters.push(filterObj);
+    }
+  }
+
+  if (filters.length > 0) {
+    let title;
+    if (artistDisplayName) {
+      title = `Tác giả: ${artistDisplayName}`;
+    } else if (filters.length === 1) {
+      const f = filters[0];
+      const labelMap = {
+        group: 'Nhóm',
+        character: 'Nhân vật',
+        series: 'Bộ truyện',
+        tag: 'Thẻ',
+        type: 'Loại',
+      };
+      title = `${labelMap[f.nozomiType] || 'Tìm kiếm'}: ${f.name}`;
+    } else {
+      title = `Tìm kiếm: ${filters.map((f) => f.name).join(' + ')}`;
+    }
+
+    const excludeNote = excludeFilters.length > 0
+      ? ` • Loại trừ: ${excludeFilters.map((f) => f.name).join(', ')}`
+      : '';
+
     return {
-      title: `Tác giả: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('artist', artist, lang)
+      title,
+      subtitle: `Ngôn ngữ: ${lang}${excludeNote}`,
+      filters,
+      excludeFilters,
     };
   }
 
-  // Extract group filter
-  const grpMatch = queryString.match(/group:([^\s&]+)/i);
-  if (grpMatch) {
-    const grp = grpMatch[1];
-    const displayName = grp.replace(/[_\+]+/g, ' ');
-    return {
-      title: `Nhóm: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('group', grp, lang)
-    };
-  }
-
-  // Extract character filter
-  const charSearchMatch = queryString.match(/character:([^\s&]+)/i);
-  if (charSearchMatch) {
-    const charName = charSearchMatch[1];
-    const displayName = charName.replace(/[_\+]+/g, ' ');
-    return {
-      title: `Nhân vật: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('character', charName, lang)
-    };
-  }
-
-  // Extract series filter
-  const seriesSearchMatch = queryString.match(/series:([^\s&]+)/i);
-  if (seriesSearchMatch) {
-    const seriesName = seriesSearchMatch[1];
-    const displayName = seriesName.replace(/[_\+]+/g, ' ');
-    return {
-      title: `Bộ truyện: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('series', seriesName, lang)
-    };
-  }
-
-  // Extract tag filter
-  const tMatch = queryString.match(/tag:([^\s&]+)/i);
-  if (tMatch) {
-    const tag = tMatch[1];
-    const displayName = tag.replace(/[_\+]+/g, ' ');
-    return {
-      title: `Thẻ: ${displayName}`,
-      subtitle: `Ngôn ngữ: ${lang}`,
-      nozomiUrls: getNozomiVariants('tag', tag, lang)
-    };
-  }
-
-  // Bare artist/term input (e.g. "dokuneko noil" or "jimpu6")
+  // 3. Bare artist/term input (e.g. "dokuneko noil" or "jimpu6")
   if (!queryString.includes('/') && !queryString.includes('?') && queryString.length >= 2) {
     const term = queryString.trim();
     const displayName = term.replace(/[_\+]+/g, ' ');
     return {
       title: `Tác giả: ${displayName}`,
-      subtitle: `Ngôn ngữ: english`,
-      nozomiUrls: getNozomiVariants('artist', term, 'english')
+      subtitle: 'Ngôn ngữ: english',
+      filters: [{
+        type: 'artist',
+        name: displayName,
+        nozomiUrls: getNozomiVariants('artist', term, 'english'),
+      }],
+      excludeFilters: [],
     };
   }
 
@@ -383,7 +423,7 @@ function parseNozomiBuffer(arrayBuffer) {
   const view = new DataView(arrayBuffer);
   const ids = [];
   const total = view.byteLength;
-  for (let offset = 0; offset < total; offset += 4) {
+  for (let offset = 0; offset + 4 <= total; offset += 4) {
     const id = view.getInt32(offset, false); // false = Big-Endian
     if (id > 0) {
       ids.push(id.toString());
@@ -483,7 +523,7 @@ async function handleImage(url) {
     return new Response('Missing "url" parameter', { status: 400, headers: CORS_HEADERS });
   }
 
-  if (!targetUrl.includes(IMAGE_DOMAIN) && !targetUrl.includes('hitomi.la')) {
+  if (!isAllowedImageTarget(targetUrl)) {
     return new Response('Invalid target domain', { status: 403, headers: CORS_HEADERS });
   }
 
@@ -511,12 +551,32 @@ async function handleImage(url) {
 
 // ==================== HELPERS ====================
 
+function isAllowedImageTarget(targetUrl) {
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    return (
+      host === IMAGE_DOMAIN ||
+      host.endsWith('.' + IMAGE_DOMAIN) ||
+      host === 'hitomi.la' ||
+      host.endsWith('.hitomi.la')
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function fetchGalleryInfo(galleryId) {
   const res = await fetch(`https://${LTN_DOMAIN}/galleries/${galleryId}.js`, {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Referer': 'https://hitomi.la/',
-    }
+    },
+    cf: {
+      cacheTtl: 3600,
+      cacheEverything: true,
+    },
   });
 
   if (!res.ok) {
@@ -533,7 +593,11 @@ async function fetchGg() {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Referer': 'https://hitomi.la/',
-    }
+    },
+    cf: {
+      cacheTtl: 300,
+      cacheEverything: true,
+    },
   });
 
   if (!res.ok) {
